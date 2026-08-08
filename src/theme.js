@@ -1,0 +1,17 @@
+export const COLORS = {
+  bg: '#FAF6F0',
+  surface: '#FFFFFF',
+  ink: '#2A2420',
+  inkSoft: '#75695D',
+  inkFaint: '#A79C8E',
+  walnut: '#6B4226',
+  walnutDark: '#4A2D18',
+  sage: '#6E7D4F',
+  sageBg: '#EEF1E4',
+  rust: '#A6432A',
+  rustBg: '#F6E6E0',
+  gold: '#B08A45',
+  goldBg: '#F5EEDD',
+  border: '#E6DFD3',
+  borderSoft: '#F0EAE0',
+};

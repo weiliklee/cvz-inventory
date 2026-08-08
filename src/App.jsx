@@ -2,26 +2,11 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   LayoutDashboard, Package, ArrowLeftRight, Truck, Plus, Search,
   Pencil, Trash2, X, AlertTriangle, TrendingUp, TrendingDown,
-  CheckCircle2, Circle, ChevronDown, Sofa, Download, Upload
+  CheckCircle2, Circle, ChevronDown, Sofa, Download, Upload, LogOut
 } from 'lucide-react';
-
-const COLORS = {
-  bg: '#FAF6F0',
-  surface: '#FFFFFF',
-  ink: '#2A2420',
-  inkSoft: '#75695D',
-  inkFaint: '#A79C8E',
-  walnut: '#6B4226',
-  walnutDark: '#4A2D18',
-  sage: '#6E7D4F',
-  sageBg: '#EEF1E4',
-  rust: '#A6432A',
-  rustBg: '#F6E6E0',
-  gold: '#B08A45',
-  goldBg: '#F5EEDD',
-  border: '#E6DFD3',
-  borderSoft: '#F0EAE0',
-};
+import { COLORS } from './theme.js';
+import { useAuth } from './useAuth.js';
+import { LoginForm, SetPasswordForm } from './Auth.jsx';
 
 const CATEGORIES = ['Sofa', 'Dining', 'Bedroom', 'Office', 'Storage', 'Outdoor', 'Decor', 'Other'];
 
@@ -282,8 +267,47 @@ const inputStyle = {
   outline: 'none',
 };
 
+// ---------- Root (auth gate) ----------
+export default function Root() {
+  const { loading, session, profile, signOut } = useAuth();
+
+  const inviteFlow = typeof window !== 'undefined' &&
+    (window.location.hash.includes('type=invite') || window.location.hash.includes('type=recovery'));
+  const [settingPassword, setSettingPassword] = useState(inviteFlow);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: COLORS.bg }}>
+        <div className="font-body text-sm" style={{ color: COLORS.inkSoft }}>Loading…</div>
+      </div>
+    );
+  }
+
+  if (!session) return <LoginForm />;
+
+  if (settingPassword) {
+    return (
+      <SetPasswordForm onDone={() => {
+        setSettingPassword(false);
+        window.history.replaceState(null, '', window.location.pathname);
+      }} />
+    );
+  }
+
+  if (!profile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: COLORS.bg }}>
+        <div className="font-body text-sm" style={{ color: COLORS.inkSoft }}>Setting up your account…</div>
+      </div>
+    );
+  }
+
+  return <InventoryApp profile={profile} onLogout={signOut} />;
+}
+
 // ---------- App ----------
-export default function InventoryApp() {
+function InventoryApp({ profile, onLogout }) {
+  const canEdit = profile.role === 'editor';
   const { products, movements, pos, loaded, error, setError, insertProduct, editProduct, removeProduct, addMovement, addPO, receivePOAction, cancelPOAction, replaceAll } = useSupabaseStore();
   const [view, setView] = useState('dashboard');
   const [search, setSearch] = useState('');
@@ -450,9 +474,20 @@ export default function InventoryApp() {
           <button type="button" onClick={exportData} className="flex items-center gap-2.5 px-3 py-2 rounded text-xs font-body font-medium" style={{ color: '#C9BEA8' }}>
             <Download size={14} /> Export backup
           </button>
-          <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2.5 px-3 py-2 rounded text-xs font-body font-medium" style={{ color: '#C9BEA8' }}>
-            <Upload size={14} /> Import backup
-          </button>
+          {canEdit && (
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2.5 px-3 py-2 rounded text-xs font-body font-medium" style={{ color: '#C9BEA8' }}>
+              <Upload size={14} /> Import backup
+            </button>
+          )}
+          <div className="mt-2 pt-2 flex items-center justify-between gap-2" style={{ borderTop: '1px solid rgba(245,238,221,0.12)' }}>
+            <div className="min-w-0">
+              <div className="font-body text-xs truncate" style={{ color: '#F5EEDD' }}>{profile.email}</div>
+              <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: '#B08A45' }}>{profile.role}</div>
+            </div>
+            <button type="button" onClick={onLogout} title="Sign out" className="shrink-0 p-1.5 rounded" style={{ color: '#C9BEA8' }}>
+              <LogOut size={14} />
+            </button>
+          </div>
         </div>
       </aside>
       <input
@@ -470,7 +505,10 @@ export default function InventoryApp() {
           <div className="font-display text-base leading-none" style={{ color: '#FAF6F0' }}>CVZ Stock</div>
           <div className="ml-auto flex items-center gap-3">
             <button type="button" onClick={exportData} title="Export backup" style={{ color: '#C9BEA8' }}><Download size={16} /></button>
-            <button type="button" onClick={() => fileInputRef.current?.click()} title="Import backup" style={{ color: '#C9BEA8' }}><Upload size={16} /></button>
+            {canEdit && (
+              <button type="button" onClick={() => fileInputRef.current?.click()} title="Import backup" style={{ color: '#C9BEA8' }}><Upload size={16} /></button>
+            )}
+            <button type="button" onClick={onLogout} title="Sign out" style={{ color: '#C9BEA8' }}><LogOut size={16} /></button>
           </div>
         </div>
         <nav className="flex overflow-x-auto gap-1 px-2 pb-2 -mt-1">
@@ -518,6 +556,7 @@ export default function InventoryApp() {
             stockValue={stockValue}
             lowStock={lowStock}
             pendingPOs={pendingPOs}
+            canEdit={canEdit}
             onRestock={(p) => setMovementModal(p)}
             onGoProducts={() => setView('products')}
           />
@@ -529,6 +568,7 @@ export default function InventoryApp() {
             total={products.length}
             search={search} setSearch={setSearch}
             categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter}
+            canEdit={canEdit}
             onNew={() => setProductModal('new')}
             onEdit={(p) => setProductModal(p)}
             onDelete={deleteProduct}
@@ -536,12 +576,12 @@ export default function InventoryApp() {
           />
         )}
 
-        {view === 'movements' && <MovementsView movements={movements} products={products} onNew={() => setMovementModal({})} />}
+        {view === 'movements' && <MovementsView movements={movements} products={products} canEdit={canEdit} onNew={() => setMovementModal({})} />}
 
-        {view === 'pos' && <PurchaseOrdersView pos={pos} onNew={() => setPoModal(true)} onReceive={receivePO} onCancel={cancelPO} />}
+        {view === 'pos' && <PurchaseOrdersView pos={pos} canEdit={canEdit} onNew={() => setPoModal(true)} onReceive={receivePO} onCancel={cancelPO} />}
       </main>
 
-      {productModal && (
+      {productModal && canEdit && (
         <ProductModal
           initial={productModal === 'new' ? null : productModal}
           onClose={() => setProductModal(null)}
@@ -549,7 +589,7 @@ export default function InventoryApp() {
         />
       )}
 
-      {movementModal && (
+      {movementModal && canEdit && (
         <MovementModal
           products={products}
           preset={movementModal.id ? movementModal : null}
@@ -558,7 +598,7 @@ export default function InventoryApp() {
         />
       )}
 
-      {poModal && (
+      {poModal && canEdit && (
         <POModal products={products} onClose={() => setPoModal(false)} onSave={createPO} />
       )}
     </div>
@@ -566,7 +606,7 @@ export default function InventoryApp() {
 }
 
 // ---------- Dashboard ----------
-function Dashboard({ products, movements, pos, stockValue, lowStock, pendingPOs, onRestock, onGoProducts }) {
+function Dashboard({ products, movements, pos, stockValue, lowStock, pendingPOs, canEdit, onRestock, onGoProducts }) {
   const recent = movements.slice(0, 6);
   return (
     <div>
@@ -586,14 +626,14 @@ function Dashboard({ products, movements, pos, stockValue, lowStock, pendingPOs,
         <section className="md:col-span-3">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-display text-base" style={{ color: COLORS.ink }}>Low stock tags</h2>
-            {products.length === 0 && <button onClick={onGoProducts} className="text-xs font-body underline" style={{ color: COLORS.walnut }}>Add your first product →</button>}
+            {canEdit && products.length === 0 && <button onClick={onGoProducts} className="text-xs font-body underline" style={{ color: COLORS.walnut }}>Add your first product →</button>}
           </div>
           {lowStock.length === 0 ? (
             <EmptyNote text={products.length === 0 ? "No products yet — add one to start tracking stock." : "Nothing is below its reorder level right now."} />
           ) : (
             <div className="flex flex-wrap gap-4">
               {lowStock.map((p, i) => (
-                <HangTag key={p.id} product={p} rotate={i % 2 === 0 ? -2 : 2} onRestock={() => onRestock(p)} />
+                <HangTag key={p.id} product={p} rotate={i % 2 === 0 ? -2 : 2} canEdit={canEdit} onRestock={() => onRestock(p)} />
               ))}
             </div>
           )}
@@ -640,7 +680,7 @@ function EmptyNote({ text }) {
   return <p className="font-body text-sm italic" style={{ color: COLORS.inkFaint }}>{text}</p>;
 }
 
-function HangTag({ product, rotate, onRestock }) {
+function HangTag({ product, rotate, canEdit, onRestock }) {
   return (
     <div
       className="relative w-44 pt-5 pb-3 px-3.5 shadow-sm"
@@ -658,13 +698,13 @@ function HangTag({ product, rotate, onRestock }) {
         <span className="font-mono text-lg font-medium" style={{ color: COLORS.rust }}>{product.stock}</span>
         <span className="font-body text-xs" style={{ color: COLORS.inkSoft }}>left · reorder at {product.reorderLevel}</span>
       </div>
-      <button onClick={onRestock} className="font-body text-xs font-medium underline" style={{ color: COLORS.walnut }}>Log restock</button>
+      {canEdit && <button onClick={onRestock} className="font-body text-xs font-medium underline" style={{ color: COLORS.walnut }}>Log restock</button>}
     </div>
   );
 }
 
 // ---------- Products ----------
-function ProductsView({ products, total, search, setSearch, categoryFilter, setCategoryFilter, onNew, onEdit, onDelete, onMove }) {
+function ProductsView({ products, total, search, setSearch, categoryFilter, setCategoryFilter, canEdit, onNew, onEdit, onDelete, onMove }) {
   return (
     <div>
       <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
@@ -672,7 +712,7 @@ function ProductsView({ products, total, search, setSearch, categoryFilter, setC
           <h1 className="font-display text-2xl" style={{ color: COLORS.ink }}>Products</h1>
           <p className="font-body text-sm mt-0.5" style={{ color: COLORS.inkSoft }}>{total} item{total === 1 ? '' : 's'} in the catalog.</p>
         </div>
-        <Button icon={Plus} onClick={onNew}>Add product</Button>
+        {canEdit && <Button icon={Plus} onClick={onNew}>Add product</Button>}
       </header>
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -714,11 +754,13 @@ function ProductsView({ products, total, search, setSearch, categoryFilter, setC
                 <td className="px-4 py-3 font-mono text-xs" style={{ color: COLORS.inkSoft }}>{fmtMYR(p.costPrice)}</td>
                 <td className="px-4 py-3 font-mono text-xs" style={{ color: COLORS.ink }}>{fmtMYR(p.sellPrice)}</td>
                 <td className="px-4 py-3">
-                  <div className="flex items-center justify-end gap-1">
-                    <IconBtn onClick={() => onMove(p)} title="Log stock movement"><ArrowLeftRight size={14} /></IconBtn>
-                    <IconBtn onClick={() => onEdit(p)} title="Edit"><Pencil size={14} /></IconBtn>
-                    <IconBtn onClick={() => { if (confirm(`Remove ${p.name} from the catalog?`)) onDelete(p.id); }} title="Delete" danger><Trash2 size={14} /></IconBtn>
-                  </div>
+                  {canEdit ? (
+                    <div className="flex items-center justify-end gap-1">
+                      <IconBtn onClick={() => onMove(p)} title="Log stock movement"><ArrowLeftRight size={14} /></IconBtn>
+                      <IconBtn onClick={() => onEdit(p)} title="Edit"><Pencil size={14} /></IconBtn>
+                      <IconBtn onClick={() => { if (confirm(`Remove ${p.name} from the catalog?`)) onDelete(p.id); }} title="Delete" danger><Trash2 size={14} /></IconBtn>
+                    </div>
+                  ) : null}
                 </td>
               </tr>
             ))}
@@ -792,7 +834,7 @@ function ProductModal({ initial, onClose, onSave }) {
 }
 
 // ---------- Movements ----------
-function MovementsView({ movements, products, onNew }) {
+function MovementsView({ movements, products, canEdit, onNew }) {
   return (
     <div>
       <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
@@ -800,7 +842,7 @@ function MovementsView({ movements, products, onNew }) {
           <h1 className="font-display text-2xl" style={{ color: COLORS.ink }}>Stock log</h1>
           <p className="font-body text-sm mt-0.5" style={{ color: COLORS.inkSoft }}>Every stock-in and stock-out event, most recent first.</p>
         </div>
-        <Button icon={Plus} onClick={onNew} disabled={products.length === 0}>Log movement</Button>
+        {canEdit && <Button icon={Plus} onClick={onNew} disabled={products.length === 0}>Log movement</Button>}
       </header>
 
       <div className="rounded-lg overflow-x-auto" style={{ border: `1px solid ${COLORS.border}`, backgroundColor: COLORS.surface }}>
@@ -906,7 +948,7 @@ function MovementModal({ products, preset, onClose, onSave }) {
 }
 
 // ---------- Purchase Orders ----------
-function PurchaseOrdersView({ pos, onNew, onReceive, onCancel }) {
+function PurchaseOrdersView({ pos, canEdit, onNew, onReceive, onCancel }) {
   return (
     <div>
       <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
@@ -914,7 +956,7 @@ function PurchaseOrdersView({ pos, onNew, onReceive, onCancel }) {
           <h1 className="font-display text-2xl" style={{ color: COLORS.ink }}>Purchase orders</h1>
           <p className="font-body text-sm mt-0.5" style={{ color: COLORS.inkSoft }}>Orders placed with suppliers to replenish stock.</p>
         </div>
-        <Button icon={Plus} onClick={onNew}>New purchase order</Button>
+        {canEdit && <Button icon={Plus} onClick={onNew}>New purchase order</Button>}
       </header>
 
       {pos.length === 0 ? (
@@ -947,7 +989,7 @@ function PurchaseOrdersView({ pos, onNew, onReceive, onCancel }) {
                 </ul>
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-sm font-medium" style={{ color: COLORS.ink }}>Total {fmtMYR(total)}</span>
-                  {po.status === 'ordered' && (
+                  {canEdit && po.status === 'ordered' && (
                     <div className="flex gap-2">
                       <Button variant="ghost" onClick={() => onCancel(po.id)}>Cancel</Button>
                       <Button icon={CheckCircle2} onClick={() => onReceive(po)}>Mark received</Button>
