@@ -214,25 +214,12 @@ function Badge({ children, tone = 'neutral' }) {
 }
 
 function Modal({ title, onClose, children, wide }) {
-  const backdropMouseDown = useRef(false);
   return (
     <div
       className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto"
       style={{ backgroundColor: 'rgba(42,36,32,0.45)' }}
-      onMouseDown={(e) => { backdropMouseDown.current = e.target === e.currentTarget; }}
-      onClick={(e) => {
-        // Only close if the press both started and ended on the backdrop itself.
-        // This avoids accidental closes triggered by mobile native pickers
-        // (e.g. iOS select/date pickers) which can fire a stray click here.
-        if (e.target === e.currentTarget && backdropMouseDown.current) {
-          onClose();
-        }
-        backdropMouseDown.current = false;
-      }}
     >
       <div
-        onClick={(e) => e.stopPropagation()}
-        onMouseDown={(e) => e.stopPropagation()}
         className={`w-full ${wide ? 'max-w-2xl' : 'max-w-md'} rounded-lg shadow-xl overflow-y-auto my-8`}
         style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}`, maxHeight: '85vh' }}
       >
