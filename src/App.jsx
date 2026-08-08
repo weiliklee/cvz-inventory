@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   LayoutDashboard, Package, ArrowLeftRight, Truck, Plus, Search,
   Pencil, Trash2, X, AlertTriangle, TrendingUp, TrendingDown,
-  CheckCircle2, Circle, ChevronDown, Sofa, Download, Upload, LogOut
+  CheckCircle2, Circle, ChevronDown, Sofa, Download, Upload, LogOut, FileSpreadsheet
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { COLORS } from './theme.js';
 import { useAuth } from './useAuth.js';
 import { LoginForm, SetPasswordForm } from './Auth.jsx';
@@ -381,6 +382,39 @@ function InventoryApp({ profile, onLogout }) {
     URL.revokeObjectURL(url);
   }
 
+  function exportExcel() {
+    const wb = XLSX.utils.book_new();
+
+    const productRows = products.map(p => ({
+      SKU: p.sku, Name: p.name, Category: p.category, Material: p.material, Color: p.color,
+      Dimensions: p.dimensions, Supplier: p.supplier, 'Cost Price (RM)': p.costPrice,
+      'Sell Price (RM)': p.sellPrice, Stock: p.stock, 'Reorder Level': p.reorderLevel,
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(productRows), 'Products');
+
+    const movementRows = movements.map(m => ({
+      Date: fmtDate(m.date), Product: m.productName, SKU: m.sku,
+      Type: m.type === 'in' ? 'Stock in' : 'Stock out', Qty: m.qty,
+      Reason: m.reason, Reference: m.reference, Notes: m.notes,
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(movementRows), 'Stock Log');
+
+    const poRows = pos.map(o => ({
+      'PO Number': o.poNumber, Supplier: o.supplier, Status: o.status,
+      Date: fmtDate(o.date), 'Received Date': o.receivedDate ? fmtDate(o.receivedDate) : '',
+      'Total (RM)': o.items.reduce((s, i) => s + i.qty * i.cost, 0),
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(poRows), 'Purchase Orders');
+
+    const poItemRows = pos.flatMap(o => o.items.map(it => ({
+      'PO Number': o.poNumber, Supplier: o.supplier, Product: it.productName,
+      Qty: it.qty, 'Cost/Unit (RM)': it.cost, 'Line Total (RM)': it.qty * it.cost,
+    })));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(poItemRows), 'PO Line Items');
+
+    XLSX.writeFile(wb, `cvz-inventory-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
   function importData(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -458,6 +492,9 @@ function InventoryApp({ profile, onLogout }) {
         </nav>
 
         <div className="mt-auto pt-4 flex flex-col gap-1" style={{ borderTop: '1px solid rgba(245,238,221,0.12)' }}>
+          <button type="button" onClick={exportExcel} className="flex items-center gap-2.5 px-3 py-2 rounded text-xs font-body font-medium" style={{ color: '#C9BEA8' }}>
+            <FileSpreadsheet size={14} /> Export to Excel
+          </button>
           <button type="button" onClick={exportData} className="flex items-center gap-2.5 px-3 py-2 rounded text-xs font-body font-medium" style={{ color: '#C9BEA8' }}>
             <Download size={14} /> Export backup
           </button>
@@ -491,6 +528,7 @@ function InventoryApp({ profile, onLogout }) {
           <Sofa size={18} color="#F5EEDD" />
           <div className="font-display text-base leading-none" style={{ color: '#FAF6F0' }}>CVZ Stock</div>
           <div className="ml-auto flex items-center gap-3">
+            <button type="button" onClick={exportExcel} title="Export to Excel" style={{ color: '#C9BEA8' }}><FileSpreadsheet size={16} /></button>
             <button type="button" onClick={exportData} title="Export backup" style={{ color: '#C9BEA8' }}><Download size={16} /></button>
             {canEdit && (
               <button type="button" onClick={() => fileInputRef.current?.click()} title="Import backup" style={{ color: '#C9BEA8' }}><Upload size={16} /></button>
