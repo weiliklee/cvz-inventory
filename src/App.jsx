@@ -112,14 +112,22 @@ function useSupabaseStore() {
     } catch (e) { console.error(e); setError(`Could not delete product (${e.message}).`); }
   }
 
-  async function addMovement(movement, newStock) {
+  async function addMovement(movement) {
     try {
-      const { error: mErr } = await supabase.from('movements').insert(movementToRow(movement));
-      if (mErr) throw mErr;
-      const { error: pErr } = await supabase.from('products').update({ stock: newStock }).eq('id', movement.productId);
-      if (pErr) throw pErr;
-      setMovements(prev => [movement, ...prev]);
-      setProducts(prev => prev.map(p => p.id === movement.productId ? { ...p, stock: newStock } : p));
+      const { data, error } = await supabase.rpc('record_stock_movement', {
+        p_movement_id: movement.id,
+        p_product_id: movement.productId,
+        p_type: movement.type,
+        p_qty: movement.qty,
+        p_reason: movement.reason || null,
+        p_reference: movement.reference || null,
+        p_notes: movement.notes || null,
+        p_date: movement.date,
+      });
+      if (error) throw error;
+      const result = Array.isArray(data) ? data[0] : data;
+      setMovements(prev => [{ ...movement, productName: result.productName, sku: result.sku }, ...prev]);
+      setProducts(prev => prev.map(p => p.id === movement.productId ? { ...p, stock: Number(result.newStock) } : p));
       setError(null);
     } catch (e) { console.error(e); setError(`Could not log stock movement (${e.message}).`); }
   }
@@ -133,21 +141,16 @@ function useSupabaseStore() {
     } catch (e) { console.error(e); setError(`Could not create purchase order (${e.message}).`); }
   }
 
-  async function receivePOAction(po, stockUpdates, newMovements) {
+  async function receivePOAction(po) {
     try {
-      const receivedDate = new Date().toISOString();
-      const { error: poErr } = await supabase.from('purchase_orders').update({ status: 'received', received_date: receivedDate }).eq('id', po.id);
-      if (poErr) throw poErr;
-      for (const u of stockUpdates) {
-        const { error } = await supabase.from('products').update({ stock: u.stock }).eq('id', u.id);
-        if (error) throw error;
-      }
-      if (newMovements.length) {
-        const { error } = await supabase.from('movements').insert(newMovements.map(movementToRow));
-        if (error) throw error;
-      }
+      const { data, error } = await supabase.rpc('receive_purchase_order', { p_po_id: po.id });
+      if (error) throw error;
+      const result = Array.isArray(data) ? data[0] : data;
+      const receivedDate = result.receivedDate;
+      const stockUpdates = result.stockUpdates || [];
+      const newMovements = result.movements || [];
       setPos(prev => prev.map(o => o.id === po.id ? { ...o, status: 'received', receivedDate } : o));
-      setProducts(prev => prev.map(p => { const u = stockUpdates.find(x => x.id === p.id); return u ? { ...p, stock: u.stock } : p; }));
+      setProducts(prev => prev.map(p => { const u = stockUpdates.find(x => x.id === p.id); return u ? { ...p, stock: Number(u.stock) } : p; }));
       setMovements(prev => [...newMovements, ...prev]);
       setError(null);
     } catch (e) { console.error(e); setError(`Could not mark purchase order received (${e.message}).`); }
@@ -334,10 +337,8 @@ function InventoryApp({ profile, onLogout }) {
     if (!productId || !qty || qty <= 0) return;
     const product = products.find(p => p.id === productId);
     if (!product) return;
-    const delta = type === 'in' ? qty : -qty;
-    const newStock = Math.max(0, product.stock + delta);
     const movement = { id: genId('mov'), productId, productName: product.name, sku: product.sku, type, qty, reason, reference, notes, date: new Date().toISOString() };
-    addMovement(movement, newStock);
+    addMovement(movement);
     setMovementModal(null);
   }
 
@@ -347,20 +348,7 @@ function InventoryApp({ profile, onLogout }) {
   }
 
   function receivePO(po) {
-    const stockUpdates = [];
-    const newMovements = [];
-    po.items.forEach(item => {
-      const product = products.find(p => p.id === item.productId);
-      if (product) {
-        const newStock = product.stock + Number(item.qty);
-        stockUpdates.push({ id: product.id, stock: newStock });
-        newMovements.push({
-          id: genId('mov'), productId: item.productId, productName: product.name, sku: product.sku,
-          type: 'in', qty: Number(item.qty), reason: 'Purchase order', reference: po.poNumber, notes: '', date: new Date().toISOString(),
-        });
-      }
-    });
-    receivePOAction(po, stockUpdates, newMovements);
+    receivePOAction(po);
   }
 
   function cancelPO(id) {
