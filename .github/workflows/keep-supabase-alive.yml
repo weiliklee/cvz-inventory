@@ -15,6 +15,10 @@ jobs:
     steps:
       - name: Query Supabase
         run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::error::SUPABASE_URL and/or SUPABASE_ANON_KEY repo secrets are not set (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
           curl -sf "$SUPABASE_URL/rest/v1/products?select=id&limit=1" \
             -H "apikey: $SUPABASE_ANON_KEY" \
             -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
