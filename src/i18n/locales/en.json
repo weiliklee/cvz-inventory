@@ -1,0 +1,251 @@
+{
+  "app": {
+    "name": "CVZ Stock",
+    "tagline": "Inventory"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "products": "Products",
+    "stockLog": "Stock Log",
+    "purchaseOrders": "Purchase Orders"
+  },
+  "sidebar": {
+    "exportExcel": "Export to Excel",
+    "exportBackup": "Export backup",
+    "importBackup": "Import backup",
+    "signOut": "Sign out",
+    "language": "Language",
+    "textSize": "Text size"
+  },
+  "common": {
+    "loading": "Loading…",
+    "connectingToSupabase": "Connecting to Supabase…",
+    "settingUpAccount": "Setting up your account…",
+    "all": "All",
+    "cancel": "Cancel",
+    "edit": "Edit",
+    "delete": "Delete",
+    "confirmImportBackup": "This will replace all current products, stock log entries, and purchase orders in Supabase with the contents of this backup. Continue?",
+    "invalidBackupFile": "Could not read that file — make sure it's a backup exported from this app.",
+    "roleEditor": "Editor",
+    "roleViewer": "Viewer"
+  },
+  "errors": {
+    "loadFailed": "Could not load data from Supabase ({{message}}). Check that the table setup SQL has been run and .env has the right project URL/key.",
+    "saveProductFailed": "Could not save product ({{message}}).",
+    "updateProductFailed": "Could not update product ({{message}}).",
+    "deleteProductFailed": "Could not delete product ({{message}}).",
+    "logMovementFailed": "Could not log stock movement ({{message}}).",
+    "createPOFailed": "Could not create purchase order ({{message}}).",
+    "receivePOFailed": "Could not mark purchase order received ({{message}}).",
+    "cancelPOFailed": "Could not cancel purchase order ({{message}}).",
+    "importBackupFailed": "Could not import backup ({{message}})."
+  },
+  "categories": {
+    "Sofa": "Sofa",
+    "Dining": "Dining",
+    "Bedroom": "Bedroom",
+    "Office": "Office",
+    "Storage": "Storage",
+    "Outdoor": "Outdoor",
+    "Decor": "Decor",
+    "Other": "Other"
+  },
+  "reasons": {
+    "Restock": "Restock",
+    "Purchase order": "Purchase order",
+    "Customer return": "Customer return",
+    "Stock correction": "Stock correction",
+    "Sale": "Sale",
+    "Invoice": "Invoice",
+    "Damaged / write-off": "Damaged / write-off",
+    "Showroom display": "Showroom display"
+  },
+  "status": {
+    "ordered": "Ordered",
+    "received": "Received",
+    "cancelled": "Cancelled"
+  },
+  "dashboard": {
+    "title": "Overview",
+    "subtitle": "Current state of the CVZ showroom & warehouse stock.",
+    "kpi": {
+      "productsTracked": "Products tracked",
+      "stockOnHandValue": "Stock on hand value",
+      "lowStockItems": "Low stock items",
+      "posAwaitingReceipt": "POs awaiting receipt"
+    },
+    "panels": {
+      "lowStock": "Low stock",
+      "pendingReceipts": "Pending receipts",
+      "recentActivity": "Recent activity",
+      "categoryBreakdown": "Inventory by category"
+    },
+    "viewAll": "View all →",
+    "viewAllInProducts": "View all {{count}} in Products →",
+    "viewAllInPOs": "View all {{count}} in Purchase Orders →",
+    "stockLeft": "{{count}} left",
+    "reorderAt": "reorder at {{level}}",
+    "logRestock": "Log restock →",
+    "reviewReceive": "Review / Receive →",
+    "poSummary_one": "{{supplier}} · {{count}} item",
+    "poSummary_other": "{{supplier}} · {{count}} items",
+    "emptyNoProductsTitle": "No products yet",
+    "emptyNoProductsSubtitle": "Add a product to start tracking stock levels.",
+    "addProductAction": "+ Add product",
+    "emptyNoLowStockTitle": "Nothing below reorder level",
+    "emptyNoLowStockSubtitle": "All tracked products are sufficiently stocked.",
+    "emptyNoPOsTitle": "No purchase orders awaiting receipt",
+    "emptyNoPOsSubtitle": "You're all caught up.",
+    "createPOAction": "+ Create purchase order",
+    "emptyNoMovementsTitle": "No stock movements yet",
+    "emptyNoMovementsSubtitle": "Stock receipts, sales and adjustments will appear here.",
+    "logMovementAction": "+ Log stock movement"
+  },
+  "products": {
+    "title": "Products",
+    "subtitle_one": "{{count}} item in the catalog.",
+    "subtitle_other": "{{count}} items in the catalog.",
+    "addProduct": "Add product",
+    "searchPlaceholder": "Search name, SKU, material…",
+    "table": {
+      "sku": "SKU",
+      "product": "Product",
+      "category": "Category",
+      "stock": "Stock",
+      "cost": "Cost",
+      "sellPrice": "Sell price"
+    },
+    "inStock": "{{count}} in stock",
+    "logStockMovement": "Log stock movement",
+    "confirmDelete": "Remove {{name}} from the catalog?",
+    "emptyNoMatch": "No products match. Try clearing filters, or add a new product.",
+    "modal": {
+      "editTitle": "Edit product",
+      "addTitle": "Add product",
+      "name": "Product name",
+      "namePlaceholder": "e.g. Kenari 3-Seater Sofa",
+      "sku": "SKU",
+      "skuPlaceholder": "e.g. SF-KEN-3S",
+      "category": "Category",
+      "supplier": "Supplier",
+      "supplierPlaceholder": "e.g. Housing name",
+      "material": "Material",
+      "materialPlaceholder": "e.g. Fabric, Oak",
+      "color": "Color",
+      "colorPlaceholder": "e.g. Charcoal",
+      "dimensions": "Dimensions",
+      "dimensionsPlaceholder": "e.g. 200 x 90 x 85 cm",
+      "costPrice": "Cost price (RM)",
+      "sellPrice": "Sell price (RM)",
+      "currentStock": "Current stock (adjust via Stock Log instead)",
+      "startingStock": "Starting stock",
+      "reorderLevel": "Reorder level",
+      "saveChanges": "Save changes",
+      "addProduct": "Add product",
+      "errors": {
+        "nameRequired": "Product name is required.",
+        "costRequired": "Cost price is required.",
+        "sellRequired": "Sell price is required."
+      }
+    }
+  },
+  "movements": {
+    "title": "Stock log",
+    "subtitle": "Every stock-in and stock-out event, most recent first.",
+    "logMovement": "Log movement",
+    "table": {
+      "date": "Date",
+      "product": "Product",
+      "type": "Type",
+      "qty": "Qty",
+      "reason": "Reason",
+      "reference": "Reference",
+      "notes": "Notes"
+    },
+    "typeIn": "Stock in",
+    "typeOut": "Stock out",
+    "emptyNone": "No movements logged yet.",
+    "modal": {
+      "title": "Log stock movement",
+      "product": "Product",
+      "selectProduct": "Select product…",
+      "noSku": "no SKU",
+      "inStockSuffix": "in stock",
+      "direction": "Direction",
+      "in": "In",
+      "out": "Out",
+      "quantity": "Quantity",
+      "reason": "Reason",
+      "reference": "Reference (invoice #, PO #, etc.)",
+      "notes": "Notes (optional)",
+      "newStockAfter": "New stock after this:",
+      "currently": "(currently {{stock}})",
+      "save": "Save movement",
+      "errors": {
+        "chooseProduct": "Choose a product.",
+        "qtyGreaterThanZero": "Enter a quantity greater than 0."
+      }
+    }
+  },
+  "purchaseOrders": {
+    "title": "Purchase orders",
+    "subtitle": "Orders placed with suppliers to replenish stock.",
+    "newPO": "New purchase order",
+    "emptyNone": "No purchase orders yet. Create one when you need to reorder from a supplier.",
+    "supplierLine": "Supplier: {{name}}",
+    "total": "Total {{amount}}",
+    "cancel": "Cancel",
+    "markReceived": "Mark received",
+    "modal": {
+      "title": "New purchase order",
+      "poNumber": "PO number",
+      "supplier": "Supplier",
+      "supplierPlaceholder": "Supplier name",
+      "items": "Items",
+      "selectProduct": "Select product…",
+      "qtyPlaceholder": "Qty",
+      "costPlaceholder": "Cost/unit",
+      "addLineItem": "+ Add line item",
+      "create": "Create purchase order",
+      "errors": {
+        "poNumberRequired": "PO number is required.",
+        "supplierRequired": "Supplier is required.",
+        "addLineItem": "Add at least one line item with a product and quantity."
+      }
+    }
+  },
+  "auth": {
+    "signIn": {
+      "title": "Staff sign in",
+      "subtitle": "Sign in with the account you were invited with.",
+      "email": "Email",
+      "password": "Password",
+      "submit": "Sign in",
+      "submitting": "Signing in…",
+      "noAccount": "Don't have an account? Ask an admin to invite you.",
+      "incorrectCredentials": "Incorrect email or password."
+    },
+    "setPassword": {
+      "title": "Set your password",
+      "subtitle": "Choose a password to finish setting up your account.",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm password",
+      "submit": "Save password & continue",
+      "submitting": "Saving…",
+      "errors": {
+        "tooShort": "Password must be at least 8 characters.",
+        "mismatch": "Passwords do not match."
+      }
+    }
+  },
+  "textSize": {
+    "small": "Small",
+    "normal": "Normal",
+    "large": "Large",
+    "extraLarge": "Extra Large",
+    "decrease": "Decrease text size",
+    "reset": "Reset text size",
+    "increase": "Increase text size"
+  }
+}

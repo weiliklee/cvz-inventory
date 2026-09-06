@@ -1,0 +1,249 @@
+{
+  "app": {
+    "name": "CVZ Stock",
+    "tagline": "库存"
+  },
+  "nav": {
+    "dashboard": "仪表盘",
+    "products": "产品",
+    "stockLog": "库存记录",
+    "purchaseOrders": "采购订单"
+  },
+  "sidebar": {
+    "exportExcel": "导出至 Excel",
+    "exportBackup": "导出备份",
+    "importBackup": "导入备份",
+    "signOut": "退出登录",
+    "language": "语言",
+    "textSize": "字体大小"
+  },
+  "common": {
+    "loading": "加载中…",
+    "connectingToSupabase": "正在连接 Supabase…",
+    "settingUpAccount": "正在设置您的账户…",
+    "all": "全部",
+    "cancel": "取消",
+    "edit": "编辑",
+    "delete": "删除",
+    "confirmImportBackup": "此操作将以此备份的内容替换 Supabase 中所有现有的产品、库存记录和采购订单。是否继续？",
+    "invalidBackupFile": "无法读取该文件——请确认它是从本应用导出的备份文件。",
+    "roleEditor": "编辑者",
+    "roleViewer": "查看者"
+  },
+  "errors": {
+    "loadFailed": "无法从 Supabase 加载数据（{{message}}）。请确认数据表设置 SQL 已执行，且 .env 中的项目 URL/密钥正确。",
+    "saveProductFailed": "无法保存产品（{{message}}）。",
+    "updateProductFailed": "无法更新产品（{{message}}）。",
+    "deleteProductFailed": "无法删除产品（{{message}}）。",
+    "logMovementFailed": "无法记录库存变动（{{message}}）。",
+    "createPOFailed": "无法创建采购订单（{{message}}）。",
+    "receivePOFailed": "无法将采购订单标记为已收货（{{message}}）。",
+    "cancelPOFailed": "无法取消采购订单（{{message}}）。",
+    "importBackupFailed": "无法导入备份（{{message}}）。"
+  },
+  "categories": {
+    "Sofa": "沙发",
+    "Dining": "餐厅",
+    "Bedroom": "卧室",
+    "Office": "办公",
+    "Storage": "收纳",
+    "Outdoor": "户外",
+    "Decor": "装饰",
+    "Other": "其他"
+  },
+  "reasons": {
+    "Restock": "补货",
+    "Purchase order": "采购订单",
+    "Customer return": "客户退货",
+    "Stock correction": "库存调整",
+    "Sale": "销售",
+    "Invoice": "发票",
+    "Damaged / write-off": "损坏/报废",
+    "Showroom display": "展厅陈列"
+  },
+  "status": {
+    "ordered": "已下单",
+    "received": "已收货",
+    "cancelled": "已取消"
+  },
+  "dashboard": {
+    "title": "概览",
+    "subtitle": "CVZ 展厅与仓库的库存现状。",
+    "kpi": {
+      "productsTracked": "已追踪产品",
+      "stockOnHandValue": "现有库存价值",
+      "lowStockItems": "低库存产品",
+      "posAwaitingReceipt": "待收货采购订单"
+    },
+    "panels": {
+      "lowStock": "低库存",
+      "pendingReceipts": "待收货",
+      "recentActivity": "最近活动",
+      "categoryBreakdown": "分类库存占比"
+    },
+    "viewAll": "查看全部 →",
+    "viewAllInProducts": "在产品中查看全部 {{count}} 项 →",
+    "viewAllInPOs": "在采购订单中查看全部 {{count}} 项 →",
+    "stockLeft": "剩余 {{count}}",
+    "reorderAt": "补货点 {{level}}",
+    "logRestock": "记录补货 →",
+    "reviewReceive": "查看/收货 →",
+    "poSummary_other": "{{supplier}} · {{count}} 项",
+    "emptyNoProductsTitle": "尚无产品",
+    "emptyNoProductsSubtitle": "添加产品以开始追踪库存水平。",
+    "addProductAction": "+ 添加产品",
+    "emptyNoLowStockTitle": "没有低于补货点的产品",
+    "emptyNoLowStockSubtitle": "所有已追踪产品库存充足。",
+    "emptyNoPOsTitle": "没有待收货的采购订单",
+    "emptyNoPOsSubtitle": "一切都已处理完毕。",
+    "createPOAction": "+ 创建采购订单",
+    "emptyNoMovementsTitle": "尚无库存变动",
+    "emptyNoMovementsSubtitle": "收货、销售和调整记录将显示在此处。",
+    "logMovementAction": "+ 记录库存变动"
+  },
+  "products": {
+    "title": "产品",
+    "subtitle_other": "目录中共有 {{count}} 项产品。",
+    "addProduct": "添加产品",
+    "searchPlaceholder": "搜索名称、SKU、材质…",
+    "table": {
+      "sku": "SKU",
+      "product": "产品",
+      "category": "分类",
+      "stock": "库存",
+      "cost": "成本",
+      "sellPrice": "售价"
+    },
+    "inStock": "库存 {{count}}",
+    "logStockMovement": "记录库存变动",
+    "confirmDelete": "确定要将 {{name}} 从目录中移除吗？",
+    "emptyNoMatch": "没有符合条件的产品。请尝试清除筛选条件，或添加新产品。",
+    "modal": {
+      "editTitle": "编辑产品",
+      "addTitle": "添加产品",
+      "name": "产品名称",
+      "namePlaceholder": "例如：Kenari 三人座沙发",
+      "sku": "SKU",
+      "skuPlaceholder": "例如：SF-KEN-3S",
+      "category": "分类",
+      "supplier": "供应商",
+      "supplierPlaceholder": "例如：公司名称",
+      "material": "材质",
+      "materialPlaceholder": "例如：布料、橡木",
+      "color": "颜色",
+      "colorPlaceholder": "例如：炭灰色",
+      "dimensions": "尺寸",
+      "dimensionsPlaceholder": "例如：200 x 90 x 85 cm",
+      "costPrice": "成本价（RM）",
+      "sellPrice": "售价（RM）",
+      "currentStock": "当前库存（请改用库存记录调整）",
+      "startingStock": "起始库存",
+      "reorderLevel": "补货点",
+      "saveChanges": "保存更改",
+      "addProduct": "添加产品",
+      "errors": {
+        "nameRequired": "产品名称为必填项。",
+        "costRequired": "成本价为必填项。",
+        "sellRequired": "售价为必填项。"
+      }
+    }
+  },
+  "movements": {
+    "title": "库存记录",
+    "subtitle": "所有入库与出库记录，最新的在前。",
+    "logMovement": "记录变动",
+    "table": {
+      "date": "日期",
+      "product": "产品",
+      "type": "类型",
+      "qty": "数量",
+      "reason": "原因",
+      "reference": "参考编号",
+      "notes": "备注"
+    },
+    "typeIn": "入库",
+    "typeOut": "出库",
+    "emptyNone": "尚未记录任何库存变动。",
+    "modal": {
+      "title": "记录库存变动",
+      "product": "产品",
+      "selectProduct": "选择产品…",
+      "noSku": "无 SKU",
+      "inStockSuffix": "件库存",
+      "direction": "方向",
+      "in": "入库",
+      "out": "出库",
+      "quantity": "数量",
+      "reason": "原因",
+      "reference": "参考编号（发票号、PO 号等）",
+      "notes": "备注（选填）",
+      "newStockAfter": "此操作后的库存：",
+      "currently": "（当前 {{stock}}）",
+      "save": "保存变动",
+      "errors": {
+        "chooseProduct": "请选择一个产品。",
+        "qtyGreaterThanZero": "请输入大于 0 的数量。"
+      }
+    }
+  },
+  "purchaseOrders": {
+    "title": "采购订单",
+    "subtitle": "向供应商下达以补充库存的订单。",
+    "newPO": "新建采购订单",
+    "emptyNone": "尚无采购订单。需要向供应商补货时可创建一个。",
+    "supplierLine": "供应商：{{name}}",
+    "total": "总计 {{amount}}",
+    "cancel": "取消",
+    "markReceived": "标记为已收货",
+    "modal": {
+      "title": "新建采购订单",
+      "poNumber": "PO 编号",
+      "supplier": "供应商",
+      "supplierPlaceholder": "供应商名称",
+      "items": "项目",
+      "selectProduct": "选择产品…",
+      "qtyPlaceholder": "数量",
+      "costPlaceholder": "单位成本",
+      "addLineItem": "+ 添加项目",
+      "create": "创建采购订单",
+      "errors": {
+        "poNumberRequired": "PO 编号为必填项。",
+        "supplierRequired": "供应商为必填项。",
+        "addLineItem": "请至少添加一项包含产品和数量的项目。"
+      }
+    }
+  },
+  "auth": {
+    "signIn": {
+      "title": "员工登录",
+      "subtitle": "使用您受邀时的账户登录。",
+      "email": "电子邮箱",
+      "password": "密码",
+      "submit": "登录",
+      "submitting": "正在登录…",
+      "noAccount": "还没有账户？请联系管理员邀请您。",
+      "incorrectCredentials": "电子邮箱或密码不正确。"
+    },
+    "setPassword": {
+      "title": "设置您的密码",
+      "subtitle": "选择一个密码以完成账户设置。",
+      "newPassword": "新密码",
+      "confirmPassword": "确认密码",
+      "submit": "保存密码并继续",
+      "submitting": "保存中…",
+      "errors": {
+        "tooShort": "密码长度至少为 8 个字符。",
+        "mismatch": "两次输入的密码不一致。"
+      }
+    }
+  },
+  "textSize": {
+    "small": "小",
+    "normal": "正常",
+    "large": "大",
+    "extraLarge": "特大",
+    "decrease": "缩小文字",
+    "reset": "重置文字大小",
+    "increase": "放大文字"
+  }
+}

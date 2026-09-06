@@ -4,9 +4,12 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
-.font-display { font-family: 'Fraunces', serif; }
-.font-body { font-family: 'IBM Plex Sans', sans-serif; }
-.font-mono { font-family: 'IBM Plex Mono', monospace; }
+/* Fraunces/IBM Plex have no CJK glyphs — list system CJK fonts before the
+   generic fallback so Simplified Chinese renders with real glyphs instead
+   of tofu boxes, without pulling in an external CJK webfont. */
+.font-display { font-family: 'Fraunces', 'Songti SC', 'STSong', 'Noto Serif SC', serif; }
+.font-body { font-family: 'IBM Plex Sans', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif; }
+.font-mono { font-family: 'IBM Plex Mono', 'PingFang SC', 'Microsoft YaHei', monospace; }
 
 body {
   margin: 0;

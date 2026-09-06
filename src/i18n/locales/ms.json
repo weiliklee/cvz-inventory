@@ -1,0 +1,249 @@
+{
+  "app": {
+    "name": "CVZ Stock",
+    "tagline": "Inventori"
+  },
+  "nav": {
+    "dashboard": "Papan Pemuka",
+    "products": "Produk",
+    "stockLog": "Log Stok",
+    "purchaseOrders": "Pesanan Belian"
+  },
+  "sidebar": {
+    "exportExcel": "Eksport ke Excel",
+    "exportBackup": "Eksport sandaran",
+    "importBackup": "Import sandaran",
+    "signOut": "Log keluar",
+    "language": "Bahasa",
+    "textSize": "Saiz teks"
+  },
+  "common": {
+    "loading": "Memuatkan…",
+    "connectingToSupabase": "Menyambung ke Supabase…",
+    "settingUpAccount": "Menyediakan akaun anda…",
+    "all": "Semua",
+    "cancel": "Batal",
+    "edit": "Sunting",
+    "delete": "Padam",
+    "confirmImportBackup": "Ini akan menggantikan semua produk, log stok dan pesanan belian semasa dalam Supabase dengan kandungan sandaran ini. Teruskan?",
+    "invalidBackupFile": "Fail ini tidak dapat dibaca — pastikan ia sandaran yang dieksport daripada aplikasi ini.",
+    "roleEditor": "Penyunting",
+    "roleViewer": "Pelihat"
+  },
+  "errors": {
+    "loadFailed": "Data tidak dapat dimuatkan daripada Supabase ({{message}}). Pastikan SQL persediaan jadual telah dijalankan dan .env mempunyai URL/kunci projek yang betul.",
+    "saveProductFailed": "Produk tidak dapat disimpan ({{message}}).",
+    "updateProductFailed": "Produk tidak dapat dikemas kini ({{message}}).",
+    "deleteProductFailed": "Produk tidak dapat dipadam ({{message}}).",
+    "logMovementFailed": "Pergerakan stok tidak dapat direkodkan ({{message}}).",
+    "createPOFailed": "Pesanan belian tidak dapat dibuat ({{message}}).",
+    "receivePOFailed": "Pesanan belian tidak dapat ditanda sebagai diterima ({{message}}).",
+    "cancelPOFailed": "Pesanan belian tidak dapat dibatalkan ({{message}}).",
+    "importBackupFailed": "Sandaran tidak dapat diimport ({{message}})."
+  },
+  "categories": {
+    "Sofa": "Sofa",
+    "Dining": "Ruang Makan",
+    "Bedroom": "Bilik Tidur",
+    "Office": "Pejabat",
+    "Storage": "Simpanan",
+    "Outdoor": "Luar Rumah",
+    "Decor": "Hiasan",
+    "Other": "Lain-lain"
+  },
+  "reasons": {
+    "Restock": "Isi semula stok",
+    "Purchase order": "Pesanan belian",
+    "Customer return": "Pemulangan pelanggan",
+    "Stock correction": "Pembetulan stok",
+    "Sale": "Jualan",
+    "Invoice": "Invois",
+    "Damaged / write-off": "Rosak / hapus kira",
+    "Showroom display": "Paparan showroom"
+  },
+  "status": {
+    "ordered": "Dipesan",
+    "received": "Diterima",
+    "cancelled": "Dibatalkan"
+  },
+  "dashboard": {
+    "title": "Ringkasan",
+    "subtitle": "Keadaan semasa stok ruang pameran & gudang CVZ.",
+    "kpi": {
+      "productsTracked": "Produk dijejaki",
+      "stockOnHandValue": "Nilai stok semasa",
+      "lowStockItems": "Item stok rendah",
+      "posAwaitingReceipt": "PO menunggu penerimaan"
+    },
+    "panels": {
+      "lowStock": "Stok rendah",
+      "pendingReceipts": "Penerimaan tertunggak",
+      "recentActivity": "Aktiviti terkini",
+      "categoryBreakdown": "Inventori mengikut kategori"
+    },
+    "viewAll": "Lihat semua →",
+    "viewAllInProducts": "Lihat semua {{count}} dalam Produk →",
+    "viewAllInPOs": "Lihat semua {{count}} dalam Pesanan Belian →",
+    "stockLeft": "baki {{count}}",
+    "reorderAt": "pesan semula pada {{level}}",
+    "logRestock": "Log isi semula →",
+    "reviewReceive": "Semak / Terima →",
+    "poSummary_other": "{{supplier}} · {{count}} item",
+    "emptyNoProductsTitle": "Belum ada produk",
+    "emptyNoProductsSubtitle": "Tambah produk untuk mula menjejaki tahap stok.",
+    "addProductAction": "+ Tambah produk",
+    "emptyNoLowStockTitle": "Tiada yang di bawah tahap pesanan semula",
+    "emptyNoLowStockSubtitle": "Semua produk yang dijejaki mempunyai stok yang mencukupi.",
+    "emptyNoPOsTitle": "Tiada pesanan belian menunggu penerimaan",
+    "emptyNoPOsSubtitle": "Semuanya sudah lengkap.",
+    "createPOAction": "+ Cipta pesanan belian",
+    "emptyNoMovementsTitle": "Belum ada pergerakan stok",
+    "emptyNoMovementsSubtitle": "Penerimaan stok, jualan dan pelarasan akan dipaparkan di sini.",
+    "logMovementAction": "+ Log pergerakan stok"
+  },
+  "products": {
+    "title": "Produk",
+    "subtitle_other": "{{count}} produk dalam katalog.",
+    "addProduct": "Tambah produk",
+    "searchPlaceholder": "Cari nama, SKU, bahan…",
+    "table": {
+      "sku": "SKU",
+      "product": "Produk",
+      "category": "Kategori",
+      "stock": "Stok",
+      "cost": "Kos",
+      "sellPrice": "Harga jual"
+    },
+    "inStock": "{{count}} dalam stok",
+    "logStockMovement": "Log pergerakan stok",
+    "confirmDelete": "Buang {{name}} daripada katalog?",
+    "emptyNoMatch": "Tiada produk sepadan. Cuba kosongkan penapis, atau tambah produk baharu.",
+    "modal": {
+      "editTitle": "Sunting produk",
+      "addTitle": "Tambah produk",
+      "name": "Nama produk",
+      "namePlaceholder": "cth. Sofa 3-Tempat Duduk Kenari",
+      "sku": "SKU",
+      "skuPlaceholder": "cth. SF-KEN-3S",
+      "category": "Kategori",
+      "supplier": "Pembekal",
+      "supplierPlaceholder": "cth. Nama syarikat",
+      "material": "Bahan",
+      "materialPlaceholder": "cth. Fabrik, Kayu Oak",
+      "color": "Warna",
+      "colorPlaceholder": "cth. Kelabu Arang",
+      "dimensions": "Dimensi",
+      "dimensionsPlaceholder": "cth. 200 x 90 x 85 cm",
+      "costPrice": "Harga kos (RM)",
+      "sellPrice": "Harga jual (RM)",
+      "currentStock": "Stok semasa (laraskan melalui Log Stok)",
+      "startingStock": "Stok permulaan",
+      "reorderLevel": "Tahap pesanan semula",
+      "saveChanges": "Simpan perubahan",
+      "addProduct": "Tambah produk",
+      "errors": {
+        "nameRequired": "Nama produk diperlukan.",
+        "costRequired": "Harga kos diperlukan.",
+        "sellRequired": "Harga jual diperlukan."
+      }
+    }
+  },
+  "movements": {
+    "title": "Log stok",
+    "subtitle": "Setiap peristiwa stok masuk dan stok keluar, terkini dahulu.",
+    "logMovement": "Log pergerakan",
+    "table": {
+      "date": "Tarikh",
+      "product": "Produk",
+      "type": "Jenis",
+      "qty": "Kuantiti",
+      "reason": "Sebab",
+      "reference": "Rujukan",
+      "notes": "Nota"
+    },
+    "typeIn": "Stok masuk",
+    "typeOut": "Stok keluar",
+    "emptyNone": "Belum ada pergerakan direkodkan.",
+    "modal": {
+      "title": "Log pergerakan stok",
+      "product": "Produk",
+      "selectProduct": "Pilih produk…",
+      "noSku": "tiada SKU",
+      "inStockSuffix": "dalam stok",
+      "direction": "Arah",
+      "in": "Masuk",
+      "out": "Keluar",
+      "quantity": "Kuantiti",
+      "reason": "Sebab",
+      "reference": "Rujukan (no. invois, no. PO, dll.)",
+      "notes": "Nota (pilihan)",
+      "newStockAfter": "Stok baharu selepas ini:",
+      "currently": "(kini {{stock}})",
+      "save": "Simpan pergerakan",
+      "errors": {
+        "chooseProduct": "Pilih satu produk.",
+        "qtyGreaterThanZero": "Masukkan kuantiti lebih daripada 0."
+      }
+    }
+  },
+  "purchaseOrders": {
+    "title": "Pesanan belian",
+    "subtitle": "Pesanan yang dibuat kepada pembekal untuk menambah stok.",
+    "newPO": "Pesanan belian baharu",
+    "emptyNone": "Belum ada pesanan belian. Cipta satu apabila anda perlu memesan semula daripada pembekal.",
+    "supplierLine": "Pembekal: {{name}}",
+    "total": "Jumlah {{amount}}",
+    "cancel": "Batal",
+    "markReceived": "Tanda diterima",
+    "modal": {
+      "title": "Pesanan belian baharu",
+      "poNumber": "Nombor PO",
+      "supplier": "Pembekal",
+      "supplierPlaceholder": "Nama pembekal",
+      "items": "Item",
+      "selectProduct": "Pilih produk…",
+      "qtyPlaceholder": "Kuantiti",
+      "costPlaceholder": "Kos/unit",
+      "addLineItem": "+ Tambah item",
+      "create": "Cipta pesanan belian",
+      "errors": {
+        "poNumberRequired": "Nombor PO diperlukan.",
+        "supplierRequired": "Pembekal diperlukan.",
+        "addLineItem": "Tambah sekurang-kurangnya satu item dengan produk dan kuantiti."
+      }
+    }
+  },
+  "auth": {
+    "signIn": {
+      "title": "Log masuk kakitangan",
+      "subtitle": "Log masuk dengan akaun yang anda dijemput menggunakannya.",
+      "email": "E-mel",
+      "password": "Kata laluan",
+      "submit": "Log masuk",
+      "submitting": "Melog masuk…",
+      "noAccount": "Tiada akaun? Minta pentadbir menjemput anda.",
+      "incorrectCredentials": "E-mel atau kata laluan tidak tepat."
+    },
+    "setPassword": {
+      "title": "Tetapkan kata laluan anda",
+      "subtitle": "Pilih kata laluan untuk melengkapkan persediaan akaun anda.",
+      "newPassword": "Kata laluan baharu",
+      "confirmPassword": "Sahkan kata laluan",
+      "submit": "Simpan kata laluan & teruskan",
+      "submitting": "Menyimpan…",
+      "errors": {
+        "tooShort": "Kata laluan mesti sekurang-kurangnya 8 aksara.",
+        "mismatch": "Kata laluan tidak sepadan."
+      }
+    }
+  },
+  "textSize": {
+    "small": "Kecil",
+    "normal": "Biasa",
+    "large": "Besar",
+    "extraLarge": "Sangat Besar",
+    "decrease": "Kecilkan saiz teks",
+    "reset": "Set semula saiz teks",
+    "increase": "Besarkan saiz teks"
+  }
+}
