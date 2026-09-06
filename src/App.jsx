@@ -571,7 +571,9 @@ function InventoryApp({ profile, onLogout }) {
             pendingPOs={pendingPOs}
             canEdit={canEdit}
             onRestock={(p) => setMovementModal(p)}
-            onGoProducts={() => setView('products')}
+            onNavigate={(v) => setView(v)}
+            onNewMovement={() => setMovementModal({})}
+            onNewPO={() => setPoModal(true)}
           />
         )}
 
@@ -619,8 +621,36 @@ function InventoryApp({ profile, onLogout }) {
 }
 
 // ---------- Dashboard ----------
-function Dashboard({ products, movements, pos, stockValue, lowStock, pendingPOs, canEdit, onRestock, onGoProducts }) {
-  const recent = movements.slice(0, 6);
+const LOW_STOCK_DISPLAY_LIMIT = 6;
+const PENDING_PO_DISPLAY_LIMIT = 4;
+const RECENT_ACTIVITY_LIMIT = 6;
+
+function Dashboard({ products, movements, pos, stockValue, lowStock, pendingPOs, canEdit, onRestock, onNavigate, onNewMovement, onNewPO }) {
+  const recent = movements.slice(0, RECENT_ACTIVITY_LIMIT);
+
+  const visibleLowStock = useMemo(
+    () => [...lowStock].sort((a, b) => (a.stock - a.reorderLevel) - (b.stock - b.reorderLevel)).slice(0, LOW_STOCK_DISPLAY_LIMIT),
+    [lowStock]
+  );
+
+  const visiblePendingPOs = useMemo(
+    () => [...pendingPOs].sort((a, b) => new Date(a.date) - new Date(b.date)).slice(0, PENDING_PO_DISPLAY_LIMIT),
+    [pendingPOs]
+  );
+
+  // Stock value by category — reuses the same numbers as the "Stock on hand
+  // value" KPI above, just broken down. Skipped entirely if there's nothing
+  // meaningful to show rather than rendering a degenerate one-bar chart.
+  const categoryBreakdown = useMemo(() => {
+    if (!products.length || stockValue <= 0) return [];
+    const totals = {};
+    products.forEach(p => { totals[p.category] = (totals[p.category] || 0) + p.stock * p.costPrice; });
+    return Object.entries(totals)
+      .filter(([, value]) => value > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([category, value]) => ({ category, pct: Math.round((value / stockValue) * 100) }));
+  }, [products, stockValue]);
+
   return (
     <div>
       <header className="mb-7">
@@ -635,29 +665,75 @@ function Dashboard({ products, movements, pos, stockValue, lowStock, pendingPOs,
         <StatCard label="POs awaiting receipt" value={pendingPOs.length} icon={Truck} tone={pendingPOs.length ? 'warn' : 'good'} />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-        <section className="md:col-span-3">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-display text-base" style={{ color: COLORS.ink }}>Low stock tags</h2>
-            {canEdit && products.length === 0 && <button onClick={onGoProducts} className="text-xs font-body underline" style={{ color: COLORS.walnut }}>Add your first product →</button>}
-          </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <DashboardPanel title="Low stock" badge={lowStock.length}>
           {lowStock.length === 0 ? (
-            <EmptyNote text={products.length === 0 ? "No products yet — add one to start tracking stock." : "Nothing is below its reorder level right now."} />
+            products.length === 0 ? (
+              <EmptyState
+                icon={Package}
+                title="No products yet"
+                subtitle="Add a product to start tracking stock levels."
+                actionLabel={canEdit ? '+ Add product' : null}
+                onAction={() => onNavigate('products')}
+              />
+            ) : (
+              <EmptyState
+                icon={CheckCircle2}
+                title="Nothing below reorder level"
+                subtitle="All tracked products are sufficiently stocked."
+              />
+            )
           ) : (
-            <div className="flex flex-wrap gap-4">
-              {lowStock.map((p, i) => (
-                <HangTag key={p.id} product={p} rotate={i % 2 === 0 ? -2 : 2} canEdit={canEdit} onRestock={() => onRestock(p)} />
+            <>
+              {visibleLowStock.map(p => (
+                <LowStockRow key={p.id} product={p} canEdit={canEdit} onRestock={onRestock} />
               ))}
-            </div>
+              {lowStock.length > visibleLowStock.length && (
+                <PanelFooterLink label={`View all ${lowStock.length} in Products →`} onClick={() => onNavigate('products')} />
+              )}
+            </>
           )}
-        </section>
+        </DashboardPanel>
 
-        <section className="md:col-span-2">
-          <h2 className="font-display text-base mb-3" style={{ color: COLORS.ink }}>Recent activity</h2>
-          <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${COLORS.border}`, backgroundColor: COLORS.surface }}>
-            {recent.length === 0 ? (
-              <div className="p-4"><EmptyNote text="No stock movements logged yet." /></div>
-            ) : recent.map(m => (
+        <DashboardPanel title="Pending receipts" badge={pendingPOs.length}>
+          {pendingPOs.length === 0 ? (
+            <EmptyState
+              icon={Truck}
+              title="No purchase orders awaiting receipt"
+              subtitle="You're all caught up."
+              actionLabel={canEdit ? '+ Create purchase order' : null}
+              onAction={onNewPO}
+            />
+          ) : (
+            <>
+              {visiblePendingPOs.map(po => (
+                <PendingPORow key={po.id} po={po} onReview={() => onNavigate('pos')} />
+              ))}
+              {pendingPOs.length > visiblePendingPOs.length && (
+                <PanelFooterLink label={`View all ${pendingPOs.length} in Purchase Orders →`} onClick={() => onNavigate('pos')} />
+              )}
+            </>
+          )}
+        </DashboardPanel>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <DashboardPanel
+          title="Recent activity"
+          className={categoryBreakdown.length === 0 ? 'lg:col-span-2' : ''}
+          viewAllLabel={movements.length > 0 ? 'View all →' : null}
+          onViewAll={() => onNavigate('movements')}
+        >
+          {recent.length === 0 ? (
+            <EmptyState
+              icon={ArrowLeftRight}
+              title="No stock movements yet"
+              subtitle="Stock receipts, sales and adjustments will appear here."
+              actionLabel={canEdit && products.length > 0 ? '+ Log stock movement' : null}
+              onAction={onNewMovement}
+            />
+          ) : (
+            recent.map(m => (
               <div key={m.id} className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${COLORS.borderSoft}` }}>
                 {m.type === 'in' ? <TrendingUp size={15} color={COLORS.sage} /> : <TrendingDown size={15} color={COLORS.rust} />}
                 <div className="flex-1 min-w-0">
@@ -668,9 +744,118 @@ function Dashboard({ products, movements, pos, stockValue, lowStock, pendingPOs,
                   {m.type === 'in' ? '+' : '−'}{m.qty}
                 </div>
               </div>
+            ))
+          )}
+        </DashboardPanel>
+
+        {categoryBreakdown.length > 0 && (
+          <DashboardPanel title="Inventory by category">
+            {categoryBreakdown.map(c => (
+              <CategoryBar key={c.category} label={c.category} pct={c.pct} />
             ))}
-          </div>
-        </section>
+          </DashboardPanel>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// A bordered card with a title bar, shared by every dashboard panel so they
+// read as one consistent operational grid rather than mismatched sections.
+function DashboardPanel({ title, badge, viewAllLabel, onViewAll, className = '', children }) {
+  return (
+    <section className={`rounded-lg overflow-hidden ${className}`} style={{ border: `1px solid ${COLORS.border}`, backgroundColor: COLORS.surface }}>
+      <div className="flex items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${COLORS.borderSoft}` }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <h2 className="font-display text-base truncate" style={{ color: COLORS.ink }}>{title}</h2>
+          {!!badge && (
+            <span className="font-mono px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: COLORS.rustBg, color: COLORS.rust, fontSize: '10px' }}>{badge}</span>
+          )}
+        </div>
+        {viewAllLabel && (
+          <button onClick={onViewAll} className="font-body text-xs font-medium underline shrink-0" style={{ color: COLORS.walnut }}>{viewAllLabel}</button>
+        )}
+      </div>
+      <div>{children}</div>
+    </section>
+  );
+}
+
+function PanelFooterLink({ label, onClick }) {
+  return (
+    <button onClick={onClick} className="w-full text-left px-4 py-2.5 font-body text-xs font-medium underline" style={{ color: COLORS.walnut }}>
+      {label}
+    </button>
+  );
+}
+
+// An actionable empty state — replaces passive italic notes on the dashboard
+// so an empty panel reads as "nothing to do" rather than "missing content".
+function EmptyState({ icon: Icon, title, subtitle, actionLabel, onAction }) {
+  return (
+    <div className="flex flex-col items-center text-center px-4 py-8">
+      {Icon && <Icon size={20} color={COLORS.inkFaint} className="mb-2" />}
+      <div className="font-body text-sm font-medium" style={{ color: COLORS.ink }}>{title}</div>
+      {subtitle && <div className="font-body text-xs mt-1 max-w-[220px]" style={{ color: COLORS.inkFaint }}>{subtitle}</div>}
+      {actionLabel && (
+        <button onClick={onAction} className="font-body text-xs font-medium underline mt-3" style={{ color: COLORS.walnut }}>{actionLabel}</button>
+      )}
+    </div>
+  );
+}
+
+function LowStockRow({ product, canEdit, onRestock }) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${COLORS.borderSoft}` }}>
+      <AlertTriangle size={15} color={COLORS.rust} className="shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="font-body text-sm truncate" style={{ color: COLORS.ink }}>{product.name}</div>
+        <div className="font-mono text-xs" style={{ color: COLORS.inkFaint }}>{product.sku || '—'}</div>
+      </div>
+      <div className="text-right shrink-0">
+        <div className="font-body text-xs" style={{ color: COLORS.inkSoft }}>
+          <span className="font-mono font-medium" style={{ color: COLORS.rust }}>{product.stock} left</span> · reorder at {product.reorderLevel}
+        </div>
+        {canEdit && (
+          <button onClick={() => onRestock(product)} className="font-body text-xs font-medium underline" style={{ color: COLORS.walnut }}>
+            Log restock →
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PendingPORow({ po, onReview }) {
+  const itemCount = po.items.length;
+  const total = po.items.reduce((s, i) => s + i.qty * i.cost, 0);
+  return (
+    <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${COLORS.borderSoft}` }}>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-mono text-sm font-medium" style={{ color: COLORS.ink }}>{po.poNumber}</span>
+          <Badge tone="warn">{po.status}</Badge>
+        </div>
+        <div className="font-body text-xs mt-0.5 truncate" style={{ color: COLORS.inkFaint }}>
+          {po.supplier} · {itemCount} item{itemCount === 1 ? '' : 's'}{total > 0 ? ` · ${fmtMYR(total)}` : ''}
+        </div>
+      </div>
+      <button onClick={onReview} className="font-body text-xs font-medium underline shrink-0" style={{ color: COLORS.walnut }}>
+        Review / Receive →
+      </button>
+    </div>
+  );
+}
+
+function CategoryBar({ label, pct }) {
+  return (
+    <div className="px-4 py-2.5" style={{ borderBottom: `1px solid ${COLORS.borderSoft}` }}>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="font-body text-xs" style={{ color: COLORS.ink }}>{label}</span>
+        <span className="font-mono text-xs" style={{ color: COLORS.inkFaint }}>{pct}%</span>
+      </div>
+      <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: COLORS.borderSoft }}>
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: COLORS.walnut }} />
       </div>
     </div>
   );
@@ -691,29 +876,6 @@ function StatCard({ label, value, icon: Icon, tone = 'neutral' }) {
 
 function EmptyNote({ text }) {
   return <p className="font-body text-sm italic" style={{ color: COLORS.inkFaint }}>{text}</p>;
-}
-
-function HangTag({ product, rotate, canEdit, onRestock }) {
-  return (
-    <div
-      className="relative w-44 pt-5 pb-3 px-3.5 shadow-sm"
-      style={{
-        backgroundColor: COLORS.goldBg,
-        border: `1px dashed ${COLORS.gold}`,
-        borderRadius: '4px',
-        transform: `rotate(${rotate}deg)`,
-      }}
-    >
-      <div className="absolute left-1/2 -top-1.5 w-3 h-3 rounded-full -translate-x-1/2" style={{ backgroundColor: COLORS.bg, border: `1px solid ${COLORS.inkFaint}` }} />
-      <div className="font-mono tracking-wide mb-1" style={{ color: COLORS.inkFaint, fontSize: '10px' }}>{product.sku || '—'}</div>
-      <div className="font-display text-sm leading-tight mb-2" style={{ color: COLORS.ink }}>{product.name}</div>
-      <div className="flex items-baseline gap-1 mb-3">
-        <span className="font-mono text-lg font-medium" style={{ color: COLORS.rust }}>{product.stock}</span>
-        <span className="font-body text-xs" style={{ color: COLORS.inkSoft }}>left · reorder at {product.reorderLevel}</span>
-      </div>
-      {canEdit && <button onClick={onRestock} className="font-body text-xs font-medium underline" style={{ color: COLORS.walnut }}>Log restock</button>}
-    </div>
-  );
 }
 
 // ---------- Products ----------
