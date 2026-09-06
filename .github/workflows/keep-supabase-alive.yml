@@ -1,0 +1,24 @@
+name: Keep Supabase project alive
+
+# Supabase's Free plan pauses a project after 7 days with no database
+# activity. This pings it twice a week (well under that window) with a
+# trivial read so the inventory app doesn't go dark between staff logins.
+
+on:
+  schedule:
+    - cron: '0 3 * * 1,4' # Mon & Thu, 03:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query Supabase
+        run: |
+          curl -sf "$SUPABASE_URL/rest/v1/products?select=id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -o /dev/null
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
