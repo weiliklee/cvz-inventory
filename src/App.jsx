@@ -6,15 +6,27 @@ import {
   Camera
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { useTranslation } from 'react-i18next';
 import { COLORS } from './theme.js';
 import { useAuth } from './useAuth.js';
+import { useTextSize } from './useTextSize.js';
+import { SUPPORTED_LANGUAGES, persistLanguage } from './i18n/index.js';
 import { LoginForm, SetPasswordForm } from './Auth.jsx';
 
+// Canonical English values — these are what's stored in the database and
+// what the reason/category dropdowns emit. Display labels are translated
+// via t(`categories.${value}`) / t(`reasons.${value}`); the stored value
+// never changes with the UI language.
 const CATEGORIES = ['Sofa', 'Dining', 'Bedroom', 'Office', 'Storage', 'Outdoor', 'Decor', 'Other'];
+const REASONS_IN = ['Restock', 'Purchase order', 'Customer return', 'Stock correction'];
+const REASONS_OUT = ['Sale', 'Invoice', 'Damaged / write-off', 'Showroom display', 'Stock correction'];
 
 const fmtMYR = (n) => `RM ${Number(n || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (iso) => new Date(iso).toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric' });
 const genId = (p) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+const categoryLabel = (t, category) => t(`categories.${category}`, category);
+const reasonLabel = (t, reason) => t(`reasons.${reason}`, reason);
+const statusLabel = (t, status) => t(`status.${status}`, status);
 
 const FontImport = () => (
   <style>{`
@@ -73,7 +85,7 @@ async function decodeImage(file) {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('this browser cannot read that image format.')); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(Object.assign(new Error('decode'), { code: 'decode' })); };
     img.src = url;
   });
 }
@@ -83,7 +95,7 @@ async function compressImageFile(file) {
   const img = await decodeImage(file);
   const width = img.width || img.naturalWidth;
   const height = img.height || img.naturalHeight;
-  if (!width || !height) throw new Error('that image has no readable dimensions.');
+  if (!width || !height) throw Object.assign(new Error('dims'), { code: 'dims' });
 
   const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(width, height));
   const targetW = Math.max(1, Math.round(width * scale));
@@ -93,14 +105,14 @@ async function compressImageFile(file) {
   canvas.width = targetW;
   canvas.height = targetH;
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('this browser cannot process images.');
+  if (!ctx) throw Object.assign(new Error('canvas'), { code: 'canvas' });
   ctx.fillStyle = '#FFFFFF'; // JPEG has no alpha — flatten transparent PNGs onto white
   ctx.fillRect(0, 0, targetW, targetH);
   ctx.drawImage(img, 0, 0, targetW, targetH);
   if (typeof img.close === 'function') img.close();
 
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY));
-  if (!blob) throw new Error('could not compress that image.');
+  if (!blob) throw Object.assign(new Error('compress'), { code: 'compress' });
   return blob;
 }
 
@@ -134,6 +146,7 @@ const poToRow = (o) => ({
 });
 
 function useSupabaseStore() {
+  const { t } = useTranslation();
   const [products, setProducts] = useState([]);
   const [movements, setMovements] = useState([]);
   const [pos, setPos] = useState([]);
@@ -156,7 +169,7 @@ function useSupabaseStore() {
       setError(null);
     } catch (e) {
       console.error('[inventory-app] Supabase load failed:', e);
-      setError(`Could not load data from Supabase (${e.message}). Check that the table setup SQL has been run and .env has the right project URL/key.`);
+      setError(t('errors.loadFailed', { message: e.message }));
     } finally {
       setLoaded(true);
     }
@@ -173,7 +186,7 @@ function useSupabaseStore() {
       return { ok: true };
     } catch (e) {
       console.error(e);
-      setError(`Could not save product (${e.message}).`);
+      setError(t('errors.saveProductFailed', { message: e.message }));
       return { ok: false, message: e.message };
     }
   }
@@ -189,7 +202,7 @@ function useSupabaseStore() {
       return { ok: true };
     } catch (e) {
       console.error(e);
-      setError(`Could not update product (${e.message}).`);
+      setError(t('errors.updateProductFailed', { message: e.message }));
       return { ok: false, message: e.message };
     }
   }
@@ -207,21 +220,29 @@ function useSupabaseStore() {
       return { ok: true };
     } catch (e) {
       console.error(e);
-      setError(`Could not delete product (${e.message}).`);
+      setError(t('errors.deleteProductFailed', { message: e.message }));
       return { ok: false, message: e.message };
     }
   }
 
-  async function addMovement(movement, newStock) {
+  async function addMovement(movement) {
     try {
-      const { error: mErr } = await supabase.from('movements').insert(movementToRow(movement));
-      if (mErr) throw mErr;
-      const { error: pErr } = await supabase.from('products').update({ stock: newStock }).eq('id', movement.productId);
-      if (pErr) throw pErr;
-      setMovements(prev => [movement, ...prev]);
-      setProducts(prev => prev.map(p => p.id === movement.productId ? { ...p, stock: newStock } : p));
+      const { data, error } = await supabase.rpc('record_stock_movement', {
+        p_movement_id: movement.id,
+        p_product_id: movement.productId,
+        p_type: movement.type,
+        p_qty: movement.qty,
+        p_reason: movement.reason || null,
+        p_reference: movement.reference || null,
+        p_notes: movement.notes || null,
+        p_date: movement.date,
+      });
+      if (error) throw error;
+      const result = Array.isArray(data) ? data[0] : data;
+      setMovements(prev => [{ ...movement, productName: result.productName, sku: result.sku }, ...prev]);
+      setProducts(prev => prev.map(p => p.id === movement.productId ? { ...p, stock: Number(result.newStock) } : p));
       setError(null);
-    } catch (e) { console.error(e); setError(`Could not log stock movement (${e.message}).`); }
+    } catch (e) { console.error(e); setError(t('errors.logMovementFailed', { message: e.message })); }
   }
 
   async function addPO(po) {
@@ -230,27 +251,22 @@ function useSupabaseStore() {
       if (error) throw error;
       setPos(prev => [poFromRow(data[0]), ...prev]);
       setError(null);
-    } catch (e) { console.error(e); setError(`Could not create purchase order (${e.message}).`); }
+    } catch (e) { console.error(e); setError(t('errors.createPOFailed', { message: e.message })); }
   }
 
-  async function receivePOAction(po, stockUpdates, newMovements) {
+  async function receivePOAction(po) {
     try {
-      const receivedDate = new Date().toISOString();
-      const { error: poErr } = await supabase.from('purchase_orders').update({ status: 'received', received_date: receivedDate }).eq('id', po.id);
-      if (poErr) throw poErr;
-      for (const u of stockUpdates) {
-        const { error } = await supabase.from('products').update({ stock: u.stock }).eq('id', u.id);
-        if (error) throw error;
-      }
-      if (newMovements.length) {
-        const { error } = await supabase.from('movements').insert(newMovements.map(movementToRow));
-        if (error) throw error;
-      }
+      const { data, error } = await supabase.rpc('receive_purchase_order', { p_po_id: po.id });
+      if (error) throw error;
+      const result = Array.isArray(data) ? data[0] : data;
+      const receivedDate = result.receivedDate;
+      const stockUpdates = result.stockUpdates || [];
+      const newMovements = result.movements || [];
       setPos(prev => prev.map(o => o.id === po.id ? { ...o, status: 'received', receivedDate } : o));
-      setProducts(prev => prev.map(p => { const u = stockUpdates.find(x => x.id === p.id); return u ? { ...p, stock: u.stock } : p; }));
+      setProducts(prev => prev.map(p => { const u = stockUpdates.find(x => x.id === p.id); return u ? { ...p, stock: Number(u.stock) } : p; }));
       setMovements(prev => [...newMovements, ...prev]);
       setError(null);
-    } catch (e) { console.error(e); setError(`Could not mark purchase order received (${e.message}).`); }
+    } catch (e) { console.error(e); setError(t('errors.receivePOFailed', { message: e.message })); }
   }
 
   async function cancelPOAction(id) {
@@ -259,7 +275,7 @@ function useSupabaseStore() {
       if (error) throw error;
       setPos(prev => prev.map(o => o.id === id ? { ...o, status: 'cancelled' } : o));
       setError(null);
-    } catch (e) { console.error(e); setError(`Could not cancel purchase order (${e.message}).`); }
+    } catch (e) { console.error(e); setError(t('errors.cancelPOFailed', { message: e.message })); }
   }
 
   async function replaceAll(newProducts, newMovements, newPos) {
@@ -273,7 +289,7 @@ function useSupabaseStore() {
       if (newMovements.length) { const { error } = await supabase.from('movements').insert(newMovements.map(movementToRow)); if (error) throw error; }
       if (newPos.length) { const { error } = await supabase.from('purchase_orders').insert(newPos.map(poToRow)); if (error) throw error; }
       await loadAll();
-    } catch (e) { console.error(e); setError(`Could not import backup (${e.message}).`); }
+    } catch (e) { console.error(e); setError(t('errors.importBackupFailed', { message: e.message })); }
   }
 
   return { products, movements, pos, loaded, error, setError, insertProduct, editProduct, removeProduct, addMovement, addPO, receivePOAction, cancelPOAction, replaceAll };
@@ -352,14 +368,53 @@ const inputStyle = {
   border: `1px solid ${COLORS.border}`,
   backgroundColor: COLORS.bg,
   color: COLORS.ink,
-  fontSize: '14px',
+  fontSize: '0.875rem',
   fontFamily: "'IBM Plex Sans', sans-serif",
   outline: 'none',
 };
 
+// ---------- Language + text size (sidebar controls) ----------
+function LanguageSelector({ compact }) {
+  const { i18n } = useTranslation();
+  return (
+    <select
+      value={SUPPORTED_LANGUAGES.some(l => l.code === i18n.language) ? i18n.language : 'en'}
+      onChange={(e) => { i18n.changeLanguage(e.target.value); persistLanguage(e.target.value); }}
+      className={`rounded font-body text-xs outline-none ${compact ? 'px-2 py-1 shrink-0' : 'w-full px-2 py-1.5'}`}
+      style={{ backgroundColor: 'rgba(245,238,221,0.08)', color: '#F5EEDD', border: '1px solid rgba(245,238,221,0.2)' }}
+    >
+      {SUPPORTED_LANGUAGES.map(l => (
+        <option key={l.code} value={l.code} style={{ color: COLORS.ink }}>{l.label}</option>
+      ))}
+    </select>
+  );
+}
+
+function TextSizeControl({ textSize }) {
+  const { t } = useTranslation();
+  const { decrease, increase, reset, canDecrease, canIncrease } = textSize;
+  const btnStyle = (enabled) => ({
+    color: enabled ? '#F5EEDD' : 'rgba(245,238,221,0.35)',
+    border: '1px solid rgba(245,238,221,0.2)',
+    backgroundColor: 'rgba(245,238,221,0.08)',
+  });
+  return (
+    <div className="flex items-center gap-1 shrink-0">
+      <button type="button" onClick={decrease} disabled={!canDecrease} title={t('textSize.decrease')} aria-label={t('textSize.decrease')}
+        className="w-7 h-7 rounded font-mono text-xs flex items-center justify-center" style={btnStyle(canDecrease)}>A−</button>
+      <button type="button" onClick={reset} title={t('textSize.reset')} aria-label={t('textSize.reset')}
+        className="w-7 h-7 rounded font-mono text-xs flex items-center justify-center" style={btnStyle(true)}>A</button>
+      <button type="button" onClick={increase} disabled={!canIncrease} title={t('textSize.increase')} aria-label={t('textSize.increase')}
+        className="w-7 h-7 rounded font-mono text-xs flex items-center justify-center" style={btnStyle(canIncrease)}>A+</button>
+    </div>
+  );
+}
+
 // ---------- Root (auth gate) ----------
 export default function Root() {
+  const { t } = useTranslation();
   const { loading, session, profile, signOut } = useAuth();
+  const textSize = useTextSize();
 
   const inviteFlow = typeof window !== 'undefined' &&
     (window.location.hash.includes('type=invite') || window.location.hash.includes('type=recovery'));
@@ -368,7 +423,7 @@ export default function Root() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: COLORS.bg }}>
-        <div className="font-body text-sm" style={{ color: COLORS.inkSoft }}>Loading…</div>
+        <div className="font-body text-sm" style={{ color: COLORS.inkSoft }}>{t('common.loading')}</div>
       </div>
     );
   }
@@ -387,16 +442,17 @@ export default function Root() {
   if (!profile) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: COLORS.bg }}>
-        <div className="font-body text-sm" style={{ color: COLORS.inkSoft }}>Setting up your account…</div>
+        <div className="font-body text-sm" style={{ color: COLORS.inkSoft }}>{t('common.settingUpAccount')}</div>
       </div>
     );
   }
 
-  return <InventoryApp profile={profile} onLogout={signOut} />;
+  return <InventoryApp profile={profile} onLogout={signOut} textSize={textSize} />;
 }
 
 // ---------- App ----------
-function InventoryApp({ profile, onLogout }) {
+function InventoryApp({ profile, onLogout, textSize }) {
+  const { t } = useTranslation();
   const canEdit = profile.role === 'editor';
   const { products, movements, pos, loaded, error, setError, insertProduct, editProduct, removeProduct, addMovement, addPO, receivePOAction, cancelPOAction, replaceAll } = useSupabaseStore();
   const [view, setView] = useState('dashboard');
@@ -437,10 +493,8 @@ function InventoryApp({ profile, onLogout }) {
     if (!productId || !qty || qty <= 0) return;
     const product = products.find(p => p.id === productId);
     if (!product) return;
-    const delta = type === 'in' ? qty : -qty;
-    const newStock = Math.max(0, product.stock + delta);
     const movement = { id: genId('mov'), productId, productName: product.name, sku: product.sku, type, qty, reason, reference, notes, date: new Date().toISOString() };
-    addMovement(movement, newStock);
+    addMovement(movement);
     setMovementModal(null);
   }
 
@@ -450,20 +504,7 @@ function InventoryApp({ profile, onLogout }) {
   }
 
   function receivePO(po) {
-    const stockUpdates = [];
-    const newMovements = [];
-    po.items.forEach(item => {
-      const product = products.find(p => p.id === item.productId);
-      if (product) {
-        const newStock = product.stock + Number(item.qty);
-        stockUpdates.push({ id: product.id, stock: newStock });
-        newMovements.push({
-          id: genId('mov'), productId: item.productId, productName: product.name, sku: product.sku,
-          type: 'in', qty: Number(item.qty), reason: 'Purchase order', reference: po.poNumber, notes: '', date: new Date().toISOString(),
-        });
-      }
-    });
-    receivePOAction(po, stockUpdates, newMovements);
+    receivePOAction(po);
   }
 
   function cancelPO(id) {
@@ -529,7 +570,7 @@ function InventoryApp({ profile, onLogout }) {
       try {
         const parsed = JSON.parse(e.target.result);
         if (!parsed || typeof parsed !== 'object') throw new Error('Not a valid backup file');
-        const ok = confirm('This will replace all current products, stock log entries, and purchase orders in Supabase with the contents of this backup. Continue?');
+        const ok = confirm(t('common.confirmImportBackup'));
         if (!ok) return;
         replaceAll(
           Array.isArray(parsed.products) ? parsed.products : [],
@@ -537,24 +578,24 @@ function InventoryApp({ profile, onLogout }) {
           Array.isArray(parsed.pos) ? parsed.pos : []
         );
       } catch (err) {
-        setError('Could not read that file — make sure it\'s a backup exported from this app.');
+        setError(t('common.invalidBackupFile'));
       }
     };
     reader.readAsText(file);
   }
 
   const nav = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'products', label: 'Products', icon: Package },
-    { id: 'movements', label: 'Stock Log', icon: ArrowLeftRight },
-    { id: 'pos', label: 'Purchase Orders', icon: Truck },
+    { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
+    { id: 'products', label: t('nav.products'), icon: Package },
+    { id: 'movements', label: t('nav.stockLog'), icon: ArrowLeftRight },
+    { id: 'pos', label: t('nav.purchaseOrders'), icon: Truck },
   ];
 
   if (!loaded) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: COLORS.bg }}>
         <FontImport />
-        <div className="font-body text-sm" style={{ color: COLORS.inkSoft }}>Connecting to Supabase…</div>
+        <div className="font-body text-sm" style={{ color: COLORS.inkSoft }}>{t('common.connectingToSupabase')}</div>
       </div>
     );
   }
@@ -569,7 +610,7 @@ function InventoryApp({ profile, onLogout }) {
           <Sofa size={20} color="#F5EEDD" />
           <div>
             <div className="font-display text-base leading-none" style={{ color: '#FAF6F0' }}>CVZ Stock</div>
-            <div className="font-mono tracking-wide mt-0.5" style={{ color: '#B08A45', fontSize: '10px' }}>INVENTORY</div>
+            <div className="font-mono tracking-wide mt-0.5" style={{ color: '#B08A45', fontSize: '0.625rem' }}>{t('app.tagline').toUpperCase()}</div>
           </div>
         </div>
         <nav className="flex flex-col gap-1">
@@ -583,15 +624,15 @@ function InventoryApp({ profile, onLogout }) {
                 color: view === n.id ? '#F5EEDD' : '#C9BEA8',
               }}
             >
-              <n.icon size={16} />
-              {n.label}
+              <n.icon size={16} className="shrink-0" />
+              <span className="flex-1 text-left">{n.label}</span>
               {n.id === 'pos' && pendingPOs.length > 0 && (
-                <span className="ml-auto font-mono px-1.5 py-0.5 rounded-full" style={{ backgroundColor: COLORS.gold, color: '#2A2420', fontSize: '10px' }}>
+                <span className="font-mono px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: COLORS.gold, color: '#2A2420', fontSize: '0.625rem' }}>
                   {pendingPOs.length}
                 </span>
               )}
               {n.id === 'dashboard' && lowStock.length > 0 && (
-                <span className="ml-auto font-mono px-1.5 py-0.5 rounded-full" style={{ backgroundColor: COLORS.rust, color: '#fff', fontSize: '10px' }}>
+                <span className="font-mono px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: COLORS.rust, color: '#fff', fontSize: '0.625rem' }}>
                   {lowStock.length}
                 </span>
               )}
@@ -601,22 +642,34 @@ function InventoryApp({ profile, onLogout }) {
 
         <div className="mt-auto pt-4 flex flex-col gap-1" style={{ borderTop: '1px solid rgba(245,238,221,0.12)' }}>
           <button type="button" onClick={exportExcel} className="flex items-center gap-2.5 px-3 py-2 rounded text-xs font-body font-medium" style={{ color: '#C9BEA8' }}>
-            <FileSpreadsheet size={14} /> Export to Excel
+            <FileSpreadsheet size={14} className="shrink-0" /> {t('sidebar.exportExcel')}
           </button>
           <button type="button" onClick={exportData} className="flex items-center gap-2.5 px-3 py-2 rounded text-xs font-body font-medium" style={{ color: '#C9BEA8' }}>
-            <Download size={14} /> Export backup
+            <Download size={14} className="shrink-0" /> {t('sidebar.exportBackup')}
           </button>
           {canEdit && (
             <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2.5 px-3 py-2 rounded text-xs font-body font-medium" style={{ color: '#C9BEA8' }}>
-              <Upload size={14} /> Import backup
+              <Upload size={14} className="shrink-0" /> {t('sidebar.importBackup')}
             </button>
           )}
+
+          <div className="mt-2 pt-3 flex flex-col gap-2.5" style={{ borderTop: '1px solid rgba(245,238,221,0.12)' }}>
+            <div>
+              <span className="block font-mono uppercase tracking-wide mb-1" style={{ color: '#B08A45', fontSize: '0.625rem' }}>{t('sidebar.language')}</span>
+              <LanguageSelector />
+            </div>
+            <div>
+              <span className="block font-mono uppercase tracking-wide mb-1" style={{ color: '#B08A45', fontSize: '0.625rem' }}>{t('sidebar.textSize')}</span>
+              <TextSizeControl textSize={textSize} />
+            </div>
+          </div>
+
           <div className="mt-2 pt-2 flex items-center justify-between gap-2" style={{ borderTop: '1px solid rgba(245,238,221,0.12)' }}>
             <div className="min-w-0">
               <div className="font-body text-xs truncate" style={{ color: '#F5EEDD' }}>{profile.email}</div>
-              <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: '#B08A45' }}>{profile.role}</div>
+              <div className="font-mono uppercase tracking-wide" style={{ color: '#B08A45', fontSize: '0.625rem' }}>{profile.role === 'editor' ? t('common.roleEditor') : t('common.roleViewer')}</div>
             </div>
-            <button type="button" onClick={onLogout} title="Sign out" className="shrink-0 p-1.5 rounded" style={{ color: '#C9BEA8' }}>
+            <button type="button" onClick={onLogout} title={t('sidebar.signOut')} className="shrink-0 p-1.5 rounded" style={{ color: '#C9BEA8' }}>
               <LogOut size={14} />
             </button>
           </div>
@@ -636,12 +689,12 @@ function InventoryApp({ profile, onLogout }) {
           <Sofa size={18} color="#F5EEDD" />
           <div className="font-display text-base leading-none" style={{ color: '#FAF6F0' }}>CVZ Stock</div>
           <div className="ml-auto flex items-center gap-3">
-            <button type="button" onClick={exportExcel} title="Export to Excel" style={{ color: '#C9BEA8' }}><FileSpreadsheet size={16} /></button>
-            <button type="button" onClick={exportData} title="Export backup" style={{ color: '#C9BEA8' }}><Download size={16} /></button>
+            <button type="button" onClick={exportExcel} title={t('sidebar.exportExcel')} style={{ color: '#C9BEA8' }}><FileSpreadsheet size={16} /></button>
+            <button type="button" onClick={exportData} title={t('sidebar.exportBackup')} style={{ color: '#C9BEA8' }}><Download size={16} /></button>
             {canEdit && (
-              <button type="button" onClick={() => fileInputRef.current?.click()} title="Import backup" style={{ color: '#C9BEA8' }}><Upload size={16} /></button>
+              <button type="button" onClick={() => fileInputRef.current?.click()} title={t('sidebar.importBackup')} style={{ color: '#C9BEA8' }}><Upload size={16} /></button>
             )}
-            <button type="button" onClick={onLogout} title="Sign out" style={{ color: '#C9BEA8' }}><LogOut size={16} /></button>
+            <button type="button" onClick={onLogout} title={t('sidebar.signOut')} style={{ color: '#C9BEA8' }}><LogOut size={16} /></button>
           </div>
         </div>
         <nav className="flex overflow-x-auto gap-1 px-2 pb-2 -mt-1">
@@ -658,18 +711,22 @@ function InventoryApp({ profile, onLogout }) {
               <n.icon size={14} />
               {n.label}
               {n.id === 'pos' && pendingPOs.length > 0 && (
-                <span className="font-mono px-1.5 py-0.5 rounded-full" style={{ backgroundColor: COLORS.gold, color: '#2A2420', fontSize: '9px' }}>
+                <span className="font-mono px-1.5 py-0.5 rounded-full" style={{ backgroundColor: COLORS.gold, color: '#2A2420', fontSize: '0.5625rem' }}>
                   {pendingPOs.length}
                 </span>
               )}
               {n.id === 'dashboard' && lowStock.length > 0 && (
-                <span className="font-mono px-1.5 py-0.5 rounded-full" style={{ backgroundColor: COLORS.rust, color: '#fff', fontSize: '9px' }}>
+                <span className="font-mono px-1.5 py-0.5 rounded-full" style={{ backgroundColor: COLORS.rust, color: '#fff', fontSize: '0.5625rem' }}>
                   {lowStock.length}
                 </span>
               )}
             </button>
           ))}
         </nav>
+        <div className="flex items-center gap-3 px-2 pb-2.5 overflow-x-auto">
+          <LanguageSelector compact />
+          <TextSizeControl textSize={textSize} />
+        </div>
       </div>
 
       {/* Main */}
@@ -691,7 +748,9 @@ function InventoryApp({ profile, onLogout }) {
             pendingPOs={pendingPOs}
             canEdit={canEdit}
             onRestock={(p) => setMovementModal(p)}
-            onGoProducts={() => setView('products')}
+            onNavigate={(v) => setView(v)}
+            onNewMovement={() => setMovementModal({})}
+            onNewPO={() => setPoModal(true)}
           />
         )}
 
@@ -739,58 +798,244 @@ function InventoryApp({ profile, onLogout }) {
 }
 
 // ---------- Dashboard ----------
-function Dashboard({ products, movements, pos, stockValue, lowStock, pendingPOs, canEdit, onRestock, onGoProducts }) {
-  const recent = movements.slice(0, 6);
+const LOW_STOCK_DISPLAY_LIMIT = 6;
+const PENDING_PO_DISPLAY_LIMIT = 4;
+const RECENT_ACTIVITY_LIMIT = 6;
+
+function Dashboard({ products, movements, pos, stockValue, lowStock, pendingPOs, canEdit, onRestock, onNavigate, onNewMovement, onNewPO }) {
+  const { t } = useTranslation();
+  const recent = movements.slice(0, RECENT_ACTIVITY_LIMIT);
+
+  const visibleLowStock = useMemo(
+    () => [...lowStock].sort((a, b) => (a.stock - a.reorderLevel) - (b.stock - b.reorderLevel)).slice(0, LOW_STOCK_DISPLAY_LIMIT),
+    [lowStock]
+  );
+
+  const visiblePendingPOs = useMemo(
+    () => [...pendingPOs].sort((a, b) => new Date(a.date) - new Date(b.date)).slice(0, PENDING_PO_DISPLAY_LIMIT),
+    [pendingPOs]
+  );
+
+  // Stock value by category — reuses the same numbers as the "Stock on hand
+  // value" KPI above, just broken down. Skipped entirely if there's nothing
+  // meaningful to show rather than rendering a degenerate one-bar chart.
+  const categoryBreakdown = useMemo(() => {
+    if (!products.length || stockValue <= 0) return [];
+    const totals = {};
+    products.forEach(p => { totals[p.category] = (totals[p.category] || 0) + p.stock * p.costPrice; });
+    return Object.entries(totals)
+      .filter(([, value]) => value > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([category, value]) => ({ category, pct: Math.round((value / stockValue) * 100) }));
+  }, [products, stockValue]);
+
   return (
     <div>
       <header className="mb-7">
-        <h1 className="font-display text-2xl" style={{ color: COLORS.ink }}>Overview</h1>
-        <p className="font-body text-sm mt-0.5" style={{ color: COLORS.inkSoft }}>Current state of the CVZ showroom &amp; warehouse stock.</p>
+        <h1 className="font-display text-2xl" style={{ color: COLORS.ink }}>{t('dashboard.title')}</h1>
+        <p className="font-body text-sm mt-0.5" style={{ color: COLORS.inkSoft }}>{t('dashboard.subtitle')}</p>
       </header>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
-        <StatCard label="Products tracked" value={products.length} icon={Package} />
-        <StatCard label="Stock on hand value" value={fmtMYR(stockValue)} icon={TrendingUp} />
-        <StatCard label="Low stock items" value={lowStock.length} icon={AlertTriangle} tone={lowStock.length ? 'bad' : 'good'} />
-        <StatCard label="POs awaiting receipt" value={pendingPOs.length} icon={Truck} tone={pendingPOs.length ? 'warn' : 'good'} />
+        <StatCard label={t('dashboard.kpi.productsTracked')} value={products.length} icon={Package} />
+        <StatCard label={t('dashboard.kpi.stockOnHandValue')} value={fmtMYR(stockValue)} icon={TrendingUp} />
+        <StatCard label={t('dashboard.kpi.lowStockItems')} value={lowStock.length} icon={AlertTriangle} tone={lowStock.length ? 'bad' : 'good'} />
+        <StatCard label={t('dashboard.kpi.posAwaitingReceipt')} value={pendingPOs.length} icon={Truck} tone={pendingPOs.length ? 'warn' : 'good'} />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-        <section className="md:col-span-3">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-display text-base" style={{ color: COLORS.ink }}>Low stock tags</h2>
-            {canEdit && products.length === 0 && <button onClick={onGoProducts} className="text-xs font-body underline" style={{ color: COLORS.walnut }}>Add your first product →</button>}
-          </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <DashboardPanel title={t('dashboard.panels.lowStock')} badge={lowStock.length}>
           {lowStock.length === 0 ? (
-            <EmptyNote text={products.length === 0 ? "No products yet — add one to start tracking stock." : "Nothing is below its reorder level right now."} />
+            products.length === 0 ? (
+              <EmptyState
+                icon={Package}
+                title={t('dashboard.emptyNoProductsTitle')}
+                subtitle={t('dashboard.emptyNoProductsSubtitle')}
+                actionLabel={canEdit ? t('dashboard.addProductAction') : null}
+                onAction={() => onNavigate('products')}
+              />
+            ) : (
+              <EmptyState
+                icon={CheckCircle2}
+                title={t('dashboard.emptyNoLowStockTitle')}
+                subtitle={t('dashboard.emptyNoLowStockSubtitle')}
+              />
+            )
           ) : (
-            <div className="flex flex-wrap gap-4">
-              {lowStock.map((p, i) => (
-                <HangTag key={p.id} product={p} rotate={i % 2 === 0 ? -2 : 2} canEdit={canEdit} onRestock={() => onRestock(p)} />
+            <>
+              {visibleLowStock.map(p => (
+                <LowStockRow key={p.id} product={p} canEdit={canEdit} onRestock={onRestock} />
               ))}
-            </div>
+              {lowStock.length > visibleLowStock.length && (
+                <PanelFooterLink label={t('dashboard.viewAllInProducts', { count: lowStock.length })} onClick={() => onNavigate('products')} />
+              )}
+            </>
           )}
-        </section>
+        </DashboardPanel>
 
-        <section className="md:col-span-2">
-          <h2 className="font-display text-base mb-3" style={{ color: COLORS.ink }}>Recent activity</h2>
-          <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${COLORS.border}`, backgroundColor: COLORS.surface }}>
-            {recent.length === 0 ? (
-              <div className="p-4"><EmptyNote text="No stock movements logged yet." /></div>
-            ) : recent.map(m => (
+        <DashboardPanel title={t('dashboard.panels.pendingReceipts')} badge={pendingPOs.length}>
+          {pendingPOs.length === 0 ? (
+            <EmptyState
+              icon={Truck}
+              title={t('dashboard.emptyNoPOsTitle')}
+              subtitle={t('dashboard.emptyNoPOsSubtitle')}
+              actionLabel={canEdit ? t('dashboard.createPOAction') : null}
+              onAction={onNewPO}
+            />
+          ) : (
+            <>
+              {visiblePendingPOs.map(po => (
+                <PendingPORow key={po.id} po={po} onReview={() => onNavigate('pos')} />
+              ))}
+              {pendingPOs.length > visiblePendingPOs.length && (
+                <PanelFooterLink label={t('dashboard.viewAllInPOs', { count: pendingPOs.length })} onClick={() => onNavigate('pos')} />
+              )}
+            </>
+          )}
+        </DashboardPanel>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <DashboardPanel
+          title={t('dashboard.panels.recentActivity')}
+          className={categoryBreakdown.length === 0 ? 'lg:col-span-2' : ''}
+          viewAllLabel={movements.length > 0 ? t('dashboard.viewAll') : null}
+          onViewAll={() => onNavigate('movements')}
+        >
+          {recent.length === 0 ? (
+            <EmptyState
+              icon={ArrowLeftRight}
+              title={t('dashboard.emptyNoMovementsTitle')}
+              subtitle={t('dashboard.emptyNoMovementsSubtitle')}
+              actionLabel={canEdit && products.length > 0 ? t('dashboard.logMovementAction') : null}
+              onAction={onNewMovement}
+            />
+          ) : (
+            recent.map(m => (
               <div key={m.id} className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${COLORS.borderSoft}` }}>
                 {m.type === 'in' ? <TrendingUp size={15} color={COLORS.sage} /> : <TrendingDown size={15} color={COLORS.rust} />}
                 <div className="flex-1 min-w-0">
                   <div className="font-body text-sm truncate" style={{ color: COLORS.ink }}>{m.productName}</div>
-                  <div className="font-body text-xs" style={{ color: COLORS.inkFaint }}>{m.reason} · {fmtDate(m.date)}</div>
+                  <div className="font-body text-xs" style={{ color: COLORS.inkFaint }}>{reasonLabel(t, m.reason)} · {fmtDate(m.date)}</div>
                 </div>
                 <div className="font-mono text-sm font-medium" style={{ color: m.type === 'in' ? COLORS.sage : COLORS.rust }}>
                   {m.type === 'in' ? '+' : '−'}{m.qty}
                 </div>
               </div>
+            ))
+          )}
+        </DashboardPanel>
+
+        {categoryBreakdown.length > 0 && (
+          <DashboardPanel title={t('dashboard.panels.categoryBreakdown')}>
+            {categoryBreakdown.map(c => (
+              <CategoryBar key={c.category} label={categoryLabel(t, c.category)} pct={c.pct} />
             ))}
-          </div>
-        </section>
+          </DashboardPanel>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// A bordered card with a title bar, shared by every dashboard panel so they
+// read as one consistent operational grid rather than mismatched sections.
+function DashboardPanel({ title, badge, viewAllLabel, onViewAll, className = '', children }) {
+  return (
+    <section className={`rounded-lg overflow-hidden ${className}`} style={{ border: `1px solid ${COLORS.border}`, backgroundColor: COLORS.surface }}>
+      <div className="flex items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${COLORS.borderSoft}` }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <h2 className="font-display text-base truncate" style={{ color: COLORS.ink }}>{title}</h2>
+          {!!badge && (
+            <span className="font-mono px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: COLORS.rustBg, color: COLORS.rust, fontSize: '0.625rem' }}>{badge}</span>
+          )}
+        </div>
+        {viewAllLabel && (
+          <button onClick={onViewAll} className="font-body text-xs font-medium underline shrink-0" style={{ color: COLORS.walnut }}>{viewAllLabel}</button>
+        )}
+      </div>
+      <div>{children}</div>
+    </section>
+  );
+}
+
+function PanelFooterLink({ label, onClick }) {
+  return (
+    <button onClick={onClick} className="w-full text-left px-4 py-2.5 font-body text-xs font-medium underline" style={{ color: COLORS.walnut }}>
+      {label}
+    </button>
+  );
+}
+
+// An actionable empty state — replaces passive italic notes on the dashboard
+// so an empty panel reads as "nothing to do" rather than "missing content".
+function EmptyState({ icon: Icon, title, subtitle, actionLabel, onAction }) {
+  return (
+    <div className="flex flex-col items-center text-center px-4 py-8">
+      {Icon && <Icon size={20} color={COLORS.inkFaint} className="mb-2" />}
+      <div className="font-body text-sm font-medium" style={{ color: COLORS.ink }}>{title}</div>
+      {subtitle && <div className="font-body text-xs mt-1 max-w-[220px]" style={{ color: COLORS.inkFaint }}>{subtitle}</div>}
+      {actionLabel && (
+        <button onClick={onAction} className="font-body text-xs font-medium underline mt-3" style={{ color: COLORS.walnut }}>{actionLabel}</button>
+      )}
+    </div>
+  );
+}
+
+function LowStockRow({ product, canEdit, onRestock }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${COLORS.borderSoft}` }}>
+      <AlertTriangle size={15} color={COLORS.rust} className="shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="font-body text-sm truncate" style={{ color: COLORS.ink }}>{product.name}</div>
+        <div className="font-mono text-xs" style={{ color: COLORS.inkFaint }}>{product.sku || '—'}</div>
+      </div>
+      <div className="text-right shrink-0">
+        <div className="font-body text-xs" style={{ color: COLORS.inkSoft }}>
+          <span className="font-mono font-medium" style={{ color: COLORS.rust }}>{t('dashboard.stockLeft', { count: product.stock })}</span> · {t('dashboard.reorderAt', { level: product.reorderLevel })}
+        </div>
+        {canEdit && (
+          <button onClick={() => onRestock(product)} className="font-body text-xs font-medium underline" style={{ color: COLORS.walnut }}>
+            {t('dashboard.logRestock')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PendingPORow({ po, onReview }) {
+  const { t } = useTranslation();
+  const itemCount = po.items.length;
+  const total = po.items.reduce((s, i) => s + i.qty * i.cost, 0);
+  return (
+    <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${COLORS.borderSoft}` }}>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-mono text-sm font-medium" style={{ color: COLORS.ink }}>{po.poNumber}</span>
+          <Badge tone="warn">{statusLabel(t, po.status)}</Badge>
+        </div>
+        <div className="font-body text-xs mt-0.5 truncate" style={{ color: COLORS.inkFaint }}>
+          {t('dashboard.poSummary', { supplier: po.supplier, count: itemCount })}{total > 0 ? ` · ${fmtMYR(total)}` : ''}
+        </div>
+      </div>
+      <button onClick={onReview} className="font-body text-xs font-medium underline shrink-0" style={{ color: COLORS.walnut }}>
+        {t('dashboard.reviewReceive')}
+      </button>
+    </div>
+  );
+}
+
+function CategoryBar({ label, pct }) {
+  return (
+    <div className="px-4 py-2.5" style={{ borderBottom: `1px solid ${COLORS.borderSoft}` }}>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="font-body text-xs" style={{ color: COLORS.ink }}>{label}</span>
+        <span className="font-mono text-xs" style={{ color: COLORS.inkFaint }}>{pct}%</span>
+      </div>
+      <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: COLORS.borderSoft }}>
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: COLORS.walnut }} />
       </div>
     </div>
   );
@@ -813,56 +1058,30 @@ function EmptyNote({ text }) {
   return <p className="font-body text-sm italic" style={{ color: COLORS.inkFaint }}>{text}</p>;
 }
 
-function HangTag({ product, rotate, canEdit, onRestock }) {
-  return (
-    <div
-      className="relative w-44 pt-5 pb-3 px-3.5 shadow-sm"
-      style={{
-        backgroundColor: COLORS.goldBg,
-        border: `1px dashed ${COLORS.gold}`,
-        borderRadius: '4px',
-        transform: `rotate(${rotate}deg)`,
-      }}
-    >
-      <div className="absolute left-1/2 -top-1.5 w-3 h-3 rounded-full -translate-x-1/2" style={{ backgroundColor: COLORS.bg, border: `1px solid ${COLORS.inkFaint}` }} />
-      <div className="font-mono tracking-wide mb-1" style={{ color: COLORS.inkFaint, fontSize: '10px' }}>{product.sku || '—'}</div>
-      <div className="flex items-center gap-2 mb-2">
-        <ProductThumb product={product} size={28} />
-        <div className="font-display text-sm leading-tight" style={{ color: COLORS.ink }}>{product.name}</div>
-      </div>
-      <div className="flex items-baseline gap-1 mb-3">
-        <span className="font-mono text-lg font-medium" style={{ color: COLORS.rust }}>{product.stock}</span>
-        <span className="font-body text-xs" style={{ color: COLORS.inkSoft }}>left · reorder at {product.reorderLevel}</span>
-      </div>
-      {canEdit && <button onClick={onRestock} className="font-body text-xs font-medium underline" style={{ color: COLORS.walnut }}>Log restock</button>}
-    </div>
-  );
-}
-
 // ---------- Products ----------
 function ProductsView({ products, total, search, setSearch, categoryFilter, setCategoryFilter, canEdit, onNew, onEdit, onDelete, onMove }) {
+  const { t } = useTranslation();
   const [lightboxProduct, setLightboxProduct] = useState(null);
-
   return (
     <div>
       <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="font-display text-2xl" style={{ color: COLORS.ink }}>Products</h1>
-          <p className="font-body text-sm mt-0.5" style={{ color: COLORS.inkSoft }}>{total} item{total === 1 ? '' : 's'} in the catalog.</p>
+          <h1 className="font-display text-2xl" style={{ color: COLORS.ink }}>{t('products.title')}</h1>
+          <p className="font-body text-sm mt-0.5" style={{ color: COLORS.inkSoft }}>{t('products.subtitle', { count: total })}</p>
         </div>
-        {canEdit && <Button icon={Plus} onClick={onNew}>Add product</Button>}
+        {canEdit && <Button icon={Plus} onClick={onNew}>{t('products.addProduct')}</Button>}
       </header>
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex items-center gap-2 px-3 py-2 rounded flex-1 max-w-xs" style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}`, minWidth: '160px' }}>
           <Search size={14} color={COLORS.inkFaint} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, SKU, material…"
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('products.searchPlaceholder')}
             className="flex-1 bg-transparent outline-none font-body text-sm" style={{ color: COLORS.ink }} />
         </div>
         <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
           className="px-3 py-2 rounded font-body text-sm outline-none" style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.ink }}>
-          <option>All</option>
-          {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+          <option value="All">{t('common.all')}</option>
+          {CATEGORIES.map(c => <option key={c} value={c}>{categoryLabel(t, c)}</option>)}
         </select>
       </div>
 
@@ -870,14 +1089,14 @@ function ProductsView({ products, total, search, setSearch, categoryFilter, setC
         <table className="w-full font-body text-sm" style={{ minWidth: '640px' }}>
           <thead>
             <tr style={{ backgroundColor: COLORS.bg, borderBottom: `1px solid ${COLORS.border}` }}>
-              {['SKU', 'Product', 'Category', 'Stock', 'Cost', 'Sell price', ''].map(h => (
-                <th key={h} className="text-left px-4 py-2.5 font-medium text-xs" style={{ color: COLORS.inkSoft }}>{h}</th>
+              {[t('products.table.sku'), t('products.table.product'), t('products.table.category'), t('products.table.stock'), t('products.table.cost'), t('products.table.sellPrice'), ''].map((h, i) => (
+                <th key={i} className="text-left px-4 py-2.5 font-medium text-xs" style={{ color: COLORS.inkSoft }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {products.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center"><EmptyNote text="No products match. Try clearing filters, or add a new product." /></td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center"><EmptyNote text={t('products.emptyNoMatch')} /></td></tr>
             ) : products.map(p => (
               <tr key={p.id} style={{ borderBottom: `1px solid ${COLORS.borderSoft}` }}>
                 <td className="px-4 py-3 font-mono text-xs" style={{ color: COLORS.inkFaint }}>{p.sku || '—'}</td>
@@ -890,18 +1109,18 @@ function ProductsView({ products, total, search, setSearch, categoryFilter, setC
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-3" style={{ color: COLORS.inkSoft }}>{p.category}</td>
+                <td className="px-4 py-3" style={{ color: COLORS.inkSoft }}>{categoryLabel(t, p.category)}</td>
                 <td className="px-4 py-3">
-                  <Badge tone={p.stock <= p.reorderLevel ? 'bad' : p.stock <= p.reorderLevel * 2 ? 'warn' : 'good'}>{p.stock} in stock</Badge>
+                  <Badge tone={p.stock <= p.reorderLevel ? 'bad' : p.stock <= p.reorderLevel * 2 ? 'warn' : 'good'}>{t('products.inStock', { count: p.stock })}</Badge>
                 </td>
                 <td className="px-4 py-3 font-mono text-xs" style={{ color: COLORS.inkSoft }}>{fmtMYR(p.costPrice)}</td>
                 <td className="px-4 py-3 font-mono text-xs" style={{ color: COLORS.ink }}>{fmtMYR(p.sellPrice)}</td>
                 <td className="px-4 py-3">
                   {canEdit ? (
                     <div className="flex items-center justify-end gap-1">
-                      <IconBtn onClick={() => onMove(p)} title="Log stock movement"><ArrowLeftRight size={14} /></IconBtn>
-                      <IconBtn onClick={() => onEdit(p)} title="Edit"><Pencil size={14} /></IconBtn>
-                      <IconBtn onClick={() => { if (confirm(`Remove ${p.name} from the catalog?`)) onDelete(p.id); }} title="Delete" danger><Trash2 size={14} /></IconBtn>
+                      <IconBtn onClick={() => onMove(p)} title={t('products.logStockMovement')}><ArrowLeftRight size={14} /></IconBtn>
+                      <IconBtn onClick={() => onEdit(p)} title={t('common.edit')}><Pencil size={14} /></IconBtn>
+                      <IconBtn onClick={() => { if (confirm(t('products.confirmDelete', { name: p.name }))) onDelete(p.id); }} title={t('common.delete')} danger><Trash2 size={14} /></IconBtn>
                     </div>
                   ) : null}
                 </td>
@@ -919,31 +1138,33 @@ function ProductsView({ products, total, search, setSearch, categoryFilter, setC
 }
 
 function ProductThumb({ product, size = 40, onOpen }) {
+  const { t } = useTranslation();
   const url = getProductImageUrl(product?.imagePath);
   const boxStyle = {
     width: size, height: size, borderRadius: '6px', flexShrink: 0,
     border: `1px solid ${COLORS.border}`, backgroundColor: COLORS.bg, overflow: 'hidden',
   };
   const inner = url
-    ? <img src={url} alt={product?.name || 'Product photo'} loading="lazy" className="w-full h-full object-cover" />
+    ? <img src={url} alt={product?.name || t('products.photo.label')} loading="lazy" className="w-full h-full object-cover" />
     : <Package size={Math.round(size * 0.45)} color={COLORS.inkFaint} />;
 
   if (url && onOpen) {
     return (
-      <button type="button" onClick={onOpen} title="View photo"
+      <button type="button" onClick={onOpen} title={t('products.photo.view')}
         className="flex items-center justify-center cursor-zoom-in" style={{ ...boxStyle, padding: 0 }}>
         {inner}
       </button>
     );
   }
   return (
-    <div className="flex items-center justify-center" style={boxStyle} title={url ? product?.name : 'No photo'}>
+    <div className="flex items-center justify-center" style={boxStyle} title={url ? product?.name : t('products.photo.none')}>
       {inner}
     </div>
   );
 }
 
 function ImageLightbox({ product, onClose }) {
+  const { t } = useTranslation();
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -959,7 +1180,7 @@ function ImageLightbox({ product, onClose }) {
       style={{ backgroundColor: 'rgba(42,36,32,0.85)' }}
       onClick={onClose}
     >
-      <button type="button" onClick={onClose} title="Close"
+      <button type="button" onClick={onClose} title={t('products.photo.close')}
         className="absolute top-3 right-3 p-2 rounded-full" style={{ backgroundColor: '#FAF6F0', color: COLORS.ink }}>
         <X size={18} />
       </button>
@@ -978,6 +1199,7 @@ function IconBtn({ children, onClick, title, danger }) {
 }
 
 function ProductModal({ initial, onClose, onSave }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState(initial || {
     name: '', sku: '', category: CATEGORIES[0], material: '', color: '', dimensions: '',
     costPrice: '', sellPrice: '', stock: 0, reorderLevel: 3, supplier: '',
@@ -1011,11 +1233,11 @@ function ProductModal({ initial, onClose, onSave }) {
     if (!file) return;
     setPhotoError('');
     if (!isImageFile(file)) {
-      setPhotoError('That file is not an image. Choose a JPG, PNG or WebP photo.');
+      setPhotoError(t('products.photo.errors.notImage'));
       return;
     }
     if (file.size > MAX_UPLOAD_BYTES) {
-      setPhotoError(`That photo is ${(file.size / (1024 * 1024)).toFixed(1)} MB. Please choose one under 8 MB.`);
+      setPhotoError(t('products.photo.errors.tooLarge', { size: (file.size / (1024 * 1024)).toFixed(1) }));
       return;
     }
     setBusy(true);
@@ -1025,7 +1247,7 @@ function ProductModal({ initial, onClose, onSave }) {
       setRemovePhoto(false);
     } catch (err) {
       console.error('[inventory-app] Could not read image:', err);
-      setPhotoError(`Could not read that photo (${err.message || 'unsupported format'}). HEIC photos from some phones are not supported — choose a JPG or PNG instead.`);
+      setPhotoError(t('products.photo.errors.readFailed', { reason: t(`products.photo.errors.read.${err.code || 'unknown'}`) }));
     } finally {
       setBusy(false);
     }
@@ -1042,9 +1264,9 @@ function ProductModal({ initial, onClose, onSave }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (busy) return;
-    if (!form.name || !form.name.trim()) { setFormError('Product name is required.'); return; }
-    if (form.costPrice === '' || form.costPrice === null || isNaN(Number(form.costPrice))) { setFormError('Cost price is required.'); return; }
-    if (form.sellPrice === '' || form.sellPrice === null || isNaN(Number(form.sellPrice))) { setFormError('Sell price is required.'); return; }
+    if (!form.name || !form.name.trim()) { setFormError(t('products.modal.errors.nameRequired')); return; }
+    if (form.costPrice === '' || form.costPrice === null || isNaN(Number(form.costPrice))) { setFormError(t('products.modal.errors.costRequired')); return; }
+    if (form.sellPrice === '' || form.sellPrice === null || isNaN(Number(form.sellPrice))) { setFormError(t('products.modal.errors.sellRequired')); return; }
     setFormError('');
     setPhotoError('');
 
@@ -1061,7 +1283,7 @@ function ProductModal({ initial, onClose, onSave }) {
       } catch (err) {
         console.error('[inventory-app] Photo upload failed:', err);
         setBusy(false);
-        setPhotoError(`Could not upload the photo (${err.message || 'unknown error'}). The product was not saved.`);
+        setPhotoError(t('products.photo.errors.uploadFailed', { message: err.message || t('products.photo.errors.read.unknown') }));
         return;
       }
     }
@@ -1080,9 +1302,10 @@ function ProductModal({ initial, onClose, onSave }) {
     if (!result || !result.ok) {
       // Row save failed after the upload: drop the orphaned file.
       if (uploadedPath) await deleteProductImage(uploadedPath);
-      setFormError(result?.message
-        ? `Could not save the product (${result.message}).${uploadedPath ? ' The new photo was not kept.' : ''}`
-        : `Could not save the product.${uploadedPath ? ' The new photo was not kept.' : ''}`);
+      const base = result?.message
+        ? t('products.photo.errors.saveFailedWithMessage', { message: result.message })
+        : t('products.photo.errors.saveFailed');
+      setFormError(uploadedPath ? `${base} ${t('products.photo.errors.photoNotKept')}` : base);
       return;
     }
 
@@ -1091,7 +1314,7 @@ function ProductModal({ initial, onClose, onSave }) {
   };
 
   return (
-    <Modal title={initial ? 'Edit product' : 'Add product'} onClose={onClose} wide>
+    <Modal title={initial ? t('products.modal.editTitle') : t('products.modal.addTitle')} onClose={onClose} wide>
       <form onSubmit={handleSubmit} noValidate>
         {formError && (
           <div className="mb-3.5 px-3 py-2 rounded text-xs font-body font-medium" style={{ backgroundColor: COLORS.rustBg, color: COLORS.rust }}>
@@ -1099,52 +1322,52 @@ function ProductModal({ initial, onClose, onSave }) {
           </div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
-          <Field label="Product name"><input style={inputStyle} value={form.name} onChange={set('name')} placeholder="e.g. Kenari 3-Seater Sofa" /></Field>
-          <Field label="SKU"><input style={inputStyle} value={form.sku} onChange={set('sku')} placeholder="e.g. SF-KEN-3S" /></Field>
-          <Field label="Category">
+          <Field label={t('products.modal.name')}><input style={inputStyle} value={form.name} onChange={set('name')} placeholder={t('products.modal.namePlaceholder')} /></Field>
+          <Field label={t('products.modal.sku')}><input style={inputStyle} value={form.sku} onChange={set('sku')} placeholder={t('products.modal.skuPlaceholder')} /></Field>
+          <Field label={t('products.modal.category')}>
             <select style={inputStyle} value={form.category} onChange={set('category')}>
-              {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+              {CATEGORIES.map(c => <option key={c} value={c}>{categoryLabel(t, c)}</option>)}
             </select>
           </Field>
-          <Field label="Supplier"><input style={inputStyle} value={form.supplier} onChange={set('supplier')} placeholder="e.g. Housing name" /></Field>
-          <Field label="Material"><input style={inputStyle} value={form.material} onChange={set('material')} placeholder="e.g. Fabric, Oak" /></Field>
-          <Field label="Color"><input style={inputStyle} value={form.color} onChange={set('color')} placeholder="e.g. Charcoal" /></Field>
-          <Field label="Dimensions"><input style={inputStyle} value={form.dimensions} onChange={set('dimensions')} placeholder="e.g. 200 x 90 x 85 cm" /></Field>
+          <Field label={t('products.modal.supplier')}><input style={inputStyle} value={form.supplier} onChange={set('supplier')} placeholder={t('products.modal.supplierPlaceholder')} /></Field>
+          <Field label={t('products.modal.material')}><input style={inputStyle} value={form.material} onChange={set('material')} placeholder={t('products.modal.materialPlaceholder')} /></Field>
+          <Field label={t('products.modal.color')}><input style={inputStyle} value={form.color} onChange={set('color')} placeholder={t('products.modal.colorPlaceholder')} /></Field>
+          <Field label={t('products.modal.dimensions')}><input style={inputStyle} value={form.dimensions} onChange={set('dimensions')} placeholder={t('products.modal.dimensionsPlaceholder')} /></Field>
           <div />
-          <Field label="Cost price (RM)"><input type="number" step="0.01" style={inputStyle} value={form.costPrice} onChange={set('costPrice')} /></Field>
-          <Field label="Sell price (RM)"><input type="number" step="0.01" style={inputStyle} value={form.sellPrice} onChange={set('sellPrice')} /></Field>
-          <Field label={initial ? "Current stock (adjust via Stock Log instead)" : "Starting stock"}>
+          <Field label={t('products.modal.costPrice')}><input type="number" step="0.01" style={inputStyle} value={form.costPrice} onChange={set('costPrice')} /></Field>
+          <Field label={t('products.modal.sellPrice')}><input type="number" step="0.01" style={inputStyle} value={form.sellPrice} onChange={set('sellPrice')} /></Field>
+          <Field label={initial ? t('products.modal.currentStock') : t('products.modal.startingStock')}>
             <input type="number" style={inputStyle} value={form.stock} onChange={set('stock')} disabled={!!initial} />
           </Field>
-          <Field label="Reorder level"><input type="number" style={inputStyle} value={form.reorderLevel} onChange={set('reorderLevel')} /></Field>
+          <Field label={t('products.modal.reorderLevel')}><input type="number" style={inputStyle} value={form.reorderLevel} onChange={set('reorderLevel')} /></Field>
         </div>
 
         <div className="mb-3.5">
-          <span className="block text-xs font-medium font-body mb-1.5" style={{ color: COLORS.inkSoft }}>Product photo</span>
+          <span className="block text-xs font-medium font-body mb-1.5" style={{ color: COLORS.inkSoft }}>{t('products.photo.label')}</span>
           <div className="flex items-center gap-3">
             <div className="flex items-center justify-center overflow-hidden shrink-0"
               style={{ width: 72, height: 72, borderRadius: '6px', border: `1px solid ${COLORS.border}`, backgroundColor: COLORS.bg }}>
               {previewUrl
-                ? <img src={previewUrl} alt="Product photo preview" className="w-full h-full object-cover" />
+                ? <img src={previewUrl} alt={t('products.photo.previewAlt')} className="w-full h-full object-cover" />
                 : <Package size={26} color={COLORS.inkFaint} />}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <label className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded text-sm font-medium font-body cursor-pointer"
                 style={{ color: COLORS.ink, border: `1px solid ${COLORS.border}`, backgroundColor: 'transparent', opacity: busy ? 0.6 : 1 }}>
                 <Camera size={15} />
-                {previewUrl ? 'Replace photo' : 'Choose photo'}
+                {previewUrl ? t('products.photo.replace') : t('products.photo.choose')}
                 <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
               </label>
               {previewUrl && (
                 <button type="button" onClick={handleRemovePhoto} className="font-body text-xs font-medium underline" style={{ color: COLORS.rust }}>
-                  Remove photo
+                  {t('products.photo.remove')}
                 </button>
               )}
-              {busy && <span className="font-body text-xs" style={{ color: COLORS.inkFaint }}>Processing…</span>}
+              {busy && <span className="font-body text-xs" style={{ color: COLORS.inkFaint }}>{t('products.photo.processing')}</span>}
             </div>
           </div>
           <p className="font-body text-[11px] mt-1.5" style={{ color: COLORS.inkFaint }}>
-            JPG, PNG or WebP up to 8 MB. Photos are resized to 1200 px and compressed automatically.
+            {t('products.photo.hint')}
           </p>
           {photoError && (
             <div className="mt-2 px-3 py-2 rounded text-xs font-body font-medium" style={{ backgroundColor: COLORS.rustBg, color: COLORS.rust }}>
@@ -1154,8 +1377,8 @@ function ProductModal({ initial, onClose, onSave }) {
         </div>
 
         <div className="flex justify-end gap-2 mt-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit">{busy ? 'Saving…' : (initial ? 'Save changes' : 'Add product')}</Button>
+          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button type="submit">{busy ? t('products.photo.saving') : (initial ? t('products.modal.saveChanges') : t('products.modal.addProduct'))}</Button>
         </div>
       </form>
     </Modal>
@@ -1164,35 +1387,36 @@ function ProductModal({ initial, onClose, onSave }) {
 
 // ---------- Movements ----------
 function MovementsView({ movements, products, canEdit, onNew }) {
+  const { t } = useTranslation();
   return (
     <div>
       <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="font-display text-2xl" style={{ color: COLORS.ink }}>Stock log</h1>
-          <p className="font-body text-sm mt-0.5" style={{ color: COLORS.inkSoft }}>Every stock-in and stock-out event, most recent first.</p>
+          <h1 className="font-display text-2xl" style={{ color: COLORS.ink }}>{t('movements.title')}</h1>
+          <p className="font-body text-sm mt-0.5" style={{ color: COLORS.inkSoft }}>{t('movements.subtitle')}</p>
         </div>
-        {canEdit && <Button icon={Plus} onClick={onNew} disabled={products.length === 0}>Log movement</Button>}
+        {canEdit && <Button icon={Plus} onClick={onNew} disabled={products.length === 0}>{t('movements.logMovement')}</Button>}
       </header>
 
       <div className="rounded-lg overflow-x-auto" style={{ border: `1px solid ${COLORS.border}`, backgroundColor: COLORS.surface }}>
         <table className="w-full font-body text-sm" style={{ minWidth: '720px' }}>
           <thead>
             <tr style={{ backgroundColor: COLORS.bg, borderBottom: `1px solid ${COLORS.border}` }}>
-              {['Date', 'Product', 'Type', 'Qty', 'Reason', 'Reference', 'Notes'].map(h => (
-                <th key={h} className="text-left px-4 py-2.5 font-medium text-xs" style={{ color: COLORS.inkSoft }}>{h}</th>
+              {[t('movements.table.date'), t('movements.table.product'), t('movements.table.type'), t('movements.table.qty'), t('movements.table.reason'), t('movements.table.reference'), t('movements.table.notes')].map((h, i) => (
+                <th key={i} className="text-left px-4 py-2.5 font-medium text-xs" style={{ color: COLORS.inkSoft }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {movements.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center"><EmptyNote text="No movements logged yet." /></td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center"><EmptyNote text={t('movements.emptyNone')} /></td></tr>
             ) : movements.map(m => (
               <tr key={m.id} style={{ borderBottom: `1px solid ${COLORS.borderSoft}` }}>
                 <td className="px-4 py-3 font-mono text-xs" style={{ color: COLORS.inkFaint }}>{fmtDate(m.date)}</td>
                 <td className="px-4 py-3" style={{ color: COLORS.ink }}>{m.productName} <span className="font-mono text-xs" style={{ color: COLORS.inkFaint }}>({m.sku || '—'})</span></td>
-                <td className="px-4 py-3"><Badge tone={m.type === 'in' ? 'good' : 'bad'}>{m.type === 'in' ? 'Stock in' : 'Stock out'}</Badge></td>
+                <td className="px-4 py-3"><Badge tone={m.type === 'in' ? 'good' : 'bad'}>{m.type === 'in' ? t('movements.typeIn') : t('movements.typeOut')}</Badge></td>
                 <td className="px-4 py-3 font-mono" style={{ color: m.type === 'in' ? COLORS.sage : COLORS.rust }}>{m.type === 'in' ? '+' : '−'}{m.qty}</td>
-                <td className="px-4 py-3" style={{ color: COLORS.inkSoft }}>{m.reason}</td>
+                <td className="px-4 py-3" style={{ color: COLORS.inkSoft }}>{reasonLabel(t, m.reason)}</td>
                 <td className="px-4 py-3 font-mono text-xs" style={{ color: COLORS.inkFaint }}>{m.reference || '—'}</td>
                 <td className="px-4 py-3 text-xs" style={{ color: COLORS.inkFaint }}>{m.notes || '—'}</td>
               </tr>
@@ -1205,71 +1429,70 @@ function MovementsView({ movements, products, canEdit, onNew }) {
 }
 
 function MovementModal({ products, preset, onClose, onSave }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState({
     productId: preset?.id || '', type: 'out', qty: 1,
     reason: preset ? 'Restock' : 'Sale', reference: '', notes: '',
   });
   const selected = products.find(p => p.id === form.productId);
-  const reasonsIn = ['Restock', 'Purchase order', 'Customer return', 'Stock correction'];
-  const reasonsOut = ['Sale', 'Invoice', 'Damaged / write-off', 'Showroom display', 'Stock correction'];
   const [formError, setFormError] = useState('');
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!form.productId) { setFormError('Choose a product.'); return; }
-    if (!form.qty || Number(form.qty) <= 0) { setFormError('Enter a quantity greater than 0.'); return; }
+    if (!form.productId) { setFormError(t('movements.modal.errors.chooseProduct')); return; }
+    if (!form.qty || Number(form.qty) <= 0) { setFormError(t('movements.modal.errors.qtyGreaterThanZero')); return; }
     setFormError('');
     onSave(form);
   };
 
   return (
-    <Modal title="Log stock movement" onClose={onClose}>
+    <Modal title={t('movements.modal.title')} onClose={onClose}>
       <form onSubmit={handleSubmit} noValidate>
         {formError && (
           <div className="mb-3.5 px-3 py-2 rounded text-xs font-body font-medium" style={{ backgroundColor: COLORS.rustBg, color: COLORS.rust }}>
             {formError}
           </div>
         )}
-        <Field label="Product">
+        <Field label={t('movements.modal.product')}>
           <select style={inputStyle} value={form.productId} onChange={e => setForm({ ...form, productId: e.target.value })}>
-            <option value="">Select product…</option>
-            {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku || 'no SKU'}) — {p.stock} in stock</option>)}
+            <option value="">{t('movements.modal.selectProduct')}</option>
+            {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku || t('movements.modal.noSku')}) — {t('products.inStock', { count: p.stock })}</option>)}
           </select>
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
-          <Field label="Direction">
+          <Field label={t('movements.modal.direction')}>
             <div className="flex gap-2">
-              <button type="button" onClick={() => setForm({ ...form, type: 'in', reason: reasonsIn[0] })}
+              <button type="button" onClick={() => setForm({ ...form, type: 'in', reason: REASONS_IN[0] })}
                 className="flex-1 py-2 rounded text-sm font-medium font-body flex items-center justify-center gap-1"
                 style={{ backgroundColor: form.type === 'in' ? COLORS.sageBg : COLORS.bg, color: form.type === 'in' ? COLORS.sage : COLORS.inkSoft, border: `1px solid ${form.type === 'in' ? COLORS.sage : COLORS.border}` }}>
-                <TrendingUp size={14} /> In
+                <TrendingUp size={14} /> {t('movements.modal.in')}
               </button>
-              <button type="button" onClick={() => setForm({ ...form, type: 'out', reason: reasonsOut[0] })}
+              <button type="button" onClick={() => setForm({ ...form, type: 'out', reason: REASONS_OUT[0] })}
                 className="flex-1 py-2 rounded text-sm font-medium font-body flex items-center justify-center gap-1"
                 style={{ backgroundColor: form.type === 'out' ? COLORS.rustBg : COLORS.bg, color: form.type === 'out' ? COLORS.rust : COLORS.inkSoft, border: `1px solid ${form.type === 'out' ? COLORS.rust : COLORS.border}` }}>
-                <TrendingDown size={14} /> Out
+                <TrendingDown size={14} /> {t('movements.modal.out')}
               </button>
             </div>
           </Field>
-          <Field label="Quantity"><input type="number" min="1" style={inputStyle} value={form.qty} onChange={e => setForm({ ...form, qty: e.target.value })} /></Field>
+          <Field label={t('movements.modal.quantity')}><input type="number" min="1" style={inputStyle} value={form.qty} onChange={e => setForm({ ...form, qty: e.target.value })} /></Field>
         </div>
-        <Field label="Reason">
+        <Field label={t('movements.modal.reason')}>
           <select style={inputStyle} value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })}>
-            {(form.type === 'in' ? reasonsIn : reasonsOut).map(r => <option key={r}>{r}</option>)}
+            {(form.type === 'in' ? REASONS_IN : REASONS_OUT).map(r => <option key={r} value={r}>{reasonLabel(t, r)}</option>)}
           </select>
         </Field>
-        <Field label="Reference (invoice #, PO #, etc.)"><input style={inputStyle} value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} /></Field>
-        <Field label="Notes (optional)"><input style={inputStyle} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></Field>
+        <Field label={t('movements.modal.reference')}><input style={inputStyle} value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} /></Field>
+        <Field label={t('movements.modal.notes')}><input style={inputStyle} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></Field>
         {selected && (
           <p className="font-body text-xs mb-3" style={{ color: COLORS.inkFaint }}>
-            New stock after this: <span className="font-mono font-medium" style={{ color: COLORS.ink }}>
+            {t('movements.modal.newStockAfter')} <span className="font-mono font-medium" style={{ color: COLORS.ink }}>
               {Math.max(0, selected.stock + (form.type === 'in' ? Number(form.qty || 0) : -Number(form.qty || 0)))}
-            </span> (currently {selected.stock})
+            </span> {t('movements.modal.currently', { stock: selected.stock })}
           </p>
         )}
         <div className="flex justify-end gap-2 mt-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit">Save movement</Button>
+          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button type="submit">{t('movements.modal.save')}</Button>
         </div>
       </form>
     </Modal>
@@ -1278,19 +1501,20 @@ function MovementModal({ products, preset, onClose, onSave }) {
 
 // ---------- Purchase Orders ----------
 function PurchaseOrdersView({ pos, canEdit, onNew, onReceive, onCancel }) {
+  const { t } = useTranslation();
   return (
     <div>
       <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="font-display text-2xl" style={{ color: COLORS.ink }}>Purchase orders</h1>
-          <p className="font-body text-sm mt-0.5" style={{ color: COLORS.inkSoft }}>Orders placed with suppliers to replenish stock.</p>
+          <h1 className="font-display text-2xl" style={{ color: COLORS.ink }}>{t('purchaseOrders.title')}</h1>
+          <p className="font-body text-sm mt-0.5" style={{ color: COLORS.inkSoft }}>{t('purchaseOrders.subtitle')}</p>
         </div>
-        {canEdit && <Button icon={Plus} onClick={onNew}>New purchase order</Button>}
+        {canEdit && <Button icon={Plus} onClick={onNew}>{t('purchaseOrders.newPO')}</Button>}
       </header>
 
       {pos.length === 0 ? (
         <div className="rounded-lg p-8 text-center" style={{ border: `1px solid ${COLORS.border}`, backgroundColor: COLORS.surface }}>
-          <EmptyNote text="No purchase orders yet. Create one when you need to reorder from a supplier." />
+          <EmptyNote text={t('purchaseOrders.emptyNone')} />
         </div>
       ) : (
         <div className="flex flex-col gap-3">
@@ -1302,12 +1526,12 @@ function PurchaseOrdersView({ pos, canEdit, onNew, onReceive, onCancel }) {
                   <div className="flex items-center gap-3">
                     <span className="font-mono text-sm font-medium" style={{ color: COLORS.ink }}>{po.poNumber}</span>
                     <Badge tone={po.status === 'received' ? 'good' : po.status === 'cancelled' ? 'bad' : 'warn'}>
-                      {po.status}
+                      {statusLabel(t, po.status)}
                     </Badge>
                   </div>
                   <span className="font-body text-xs" style={{ color: COLORS.inkFaint }}>{fmtDate(po.date)}</span>
                 </div>
-                <div className="font-body text-sm mb-2" style={{ color: COLORS.inkSoft }}>Supplier: {po.supplier}</div>
+                <div className="font-body text-sm mb-2" style={{ color: COLORS.inkSoft }}>{t('purchaseOrders.supplierLine', { name: po.supplier })}</div>
                 <ul className="mb-3">
                   {po.items.map((it, idx) => (
                     <li key={idx} className="font-body text-xs flex justify-between py-1" style={{ color: COLORS.ink, borderBottom: idx < po.items.length - 1 ? `1px solid ${COLORS.borderSoft}` : 'none' }}>
@@ -1317,11 +1541,11 @@ function PurchaseOrdersView({ pos, canEdit, onNew, onReceive, onCancel }) {
                   ))}
                 </ul>
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-sm font-medium" style={{ color: COLORS.ink }}>Total {fmtMYR(total)}</span>
+                  <span className="font-mono text-sm font-medium" style={{ color: COLORS.ink }}>{t('purchaseOrders.total', { amount: fmtMYR(total) })}</span>
                   {canEdit && po.status === 'ordered' && (
                     <div className="flex gap-2">
-                      <Button variant="ghost" onClick={() => onCancel(po.id)}>Cancel</Button>
-                      <Button icon={CheckCircle2} onClick={() => onReceive(po)}>Mark received</Button>
+                      <Button variant="ghost" onClick={() => onCancel(po.id)}>{t('purchaseOrders.cancel')}</Button>
+                      <Button icon={CheckCircle2} onClick={() => onReceive(po)}>{t('purchaseOrders.markReceived')}</Button>
                     </div>
                   )}
                 </div>
@@ -1335,6 +1559,7 @@ function PurchaseOrdersView({ pos, canEdit, onNew, onReceive, onCancel }) {
 }
 
 function POModal({ products, onClose, onSave }) {
+  const { t } = useTranslation();
   const [supplier, setSupplier] = useState('');
   const [poNumber, setPoNumber] = useState(`PO-${Date.now().toString().slice(-6)}`);
   const [items, setItems] = useState([{ productId: '', qty: 1, cost: '' }]);
@@ -1346,19 +1571,19 @@ function POModal({ products, onClose, onSave }) {
 
   const submit = (e) => {
     e.preventDefault();
-    if (!poNumber.trim()) { setFormError('PO number is required.'); return; }
-    if (!supplier.trim()) { setFormError('Supplier is required.'); return; }
+    if (!poNumber.trim()) { setFormError(t('purchaseOrders.modal.errors.poNumberRequired')); return; }
+    if (!supplier.trim()) { setFormError(t('purchaseOrders.modal.errors.supplierRequired')); return; }
     const built = items.filter(it => it.productId && it.qty > 0).map(it => {
       const p = products.find(p => p.id === it.productId);
       return { productId: it.productId, productName: p?.name || '', qty: Number(it.qty), cost: Number(it.cost) || 0 };
     });
-    if (built.length === 0) { setFormError('Add at least one line item with a product and quantity.'); return; }
+    if (built.length === 0) { setFormError(t('purchaseOrders.modal.errors.addLineItem')); return; }
     setFormError('');
     onSave({ poNumber, supplier, items: built });
   };
 
   return (
-    <Modal title="New purchase order" onClose={onClose} wide>
+    <Modal title={t('purchaseOrders.modal.title')} onClose={onClose} wide>
       <form onSubmit={submit} noValidate>
         {formError && (
           <div className="mb-3.5 px-3 py-2 rounded text-xs font-body font-medium" style={{ backgroundColor: COLORS.rustBg, color: COLORS.rust }}>
@@ -1366,27 +1591,27 @@ function POModal({ products, onClose, onSave }) {
           </div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
-          <Field label="PO number"><input style={inputStyle} value={poNumber} onChange={e => setPoNumber(e.target.value)} /></Field>
-          <Field label="Supplier"><input style={inputStyle} value={supplier} onChange={e => setSupplier(e.target.value)} placeholder="Supplier name" /></Field>
+          <Field label={t('purchaseOrders.modal.poNumber')}><input style={inputStyle} value={poNumber} onChange={e => setPoNumber(e.target.value)} /></Field>
+          <Field label={t('purchaseOrders.modal.supplier')}><input style={inputStyle} value={supplier} onChange={e => setSupplier(e.target.value)} placeholder={t('purchaseOrders.modal.supplierPlaceholder')} /></Field>
         </div>
         <div className="mb-2 mt-1">
-          <span className="block text-xs font-medium font-body mb-2" style={{ color: COLORS.inkSoft }}>Items</span>
+          <span className="block text-xs font-medium font-body mb-2" style={{ color: COLORS.inkSoft }}>{t('purchaseOrders.modal.items')}</span>
           {items.map((it, i) => (
             <div key={i} className="flex flex-wrap items-center gap-2 mb-2">
               <select style={{ ...inputStyle, flex: '1 1 100%' }} value={it.productId} onChange={e => updateRow(i, { productId: e.target.value })}>
-                <option value="">Select product…</option>
+                <option value="">{t('purchaseOrders.modal.selectProduct')}</option>
                 {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
-              <input type="number" min="1" placeholder="Qty" style={{ ...inputStyle, flex: 1, minWidth: '70px' }} value={it.qty} onChange={e => updateRow(i, { qty: e.target.value })} />
-              <input type="number" step="0.01" placeholder="Cost/unit" style={{ ...inputStyle, flex: 1, minWidth: '90px' }} value={it.cost} onChange={e => updateRow(i, { cost: e.target.value })} />
+              <input type="number" min="1" placeholder={t('purchaseOrders.modal.qtyPlaceholder')} style={{ ...inputStyle, flex: 1, minWidth: '70px' }} value={it.qty} onChange={e => updateRow(i, { qty: e.target.value })} />
+              <input type="number" step="0.01" placeholder={t('purchaseOrders.modal.costPlaceholder')} style={{ ...inputStyle, flex: 1, minWidth: '90px' }} value={it.cost} onChange={e => updateRow(i, { cost: e.target.value })} />
               <button type="button" onClick={() => removeRow(i)} style={{ color: COLORS.rust }} className="shrink-0"><X size={16} /></button>
             </div>
           ))}
-          <button type="button" onClick={addRow} className="font-body text-xs font-medium underline" style={{ color: COLORS.walnut }}>+ Add line item</button>
+          <button type="button" onClick={addRow} className="font-body text-xs font-medium underline" style={{ color: COLORS.walnut }}>{t('purchaseOrders.modal.addLineItem')}</button>
         </div>
         <div className="flex justify-end gap-2 mt-4">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit">Create purchase order</Button>
+          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button type="submit">{t('purchaseOrders.modal.create')}</Button>
         </div>
       </form>
     </Modal>
