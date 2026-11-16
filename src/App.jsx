@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   LayoutDashboard, Package, ArrowLeftRight, Truck, Plus, Search,
   Pencil, Trash2, X, AlertTriangle, TrendingUp, TrendingDown,
-  CheckCircle2, Circle, ChevronDown, Sofa, Download, Upload, LogOut, FileSpreadsheet
+  CheckCircle2, Circle, ChevronDown, Sofa, Download, Upload, LogOut, FileSpreadsheet,
+  Camera
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { COLORS } from './theme.js';
@@ -26,17 +27,96 @@ const FontImport = () => (
 
 import { supabase } from './supabaseClient.js';
 
+// ---------- Product photos (Supabase Storage) ----------
+const PRODUCT_IMAGE_BUCKET = 'product-images';
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024; // reject originals over ~8 MB
+const MAX_IMAGE_EDGE = 1200;              // longest side after resize
+const JPEG_QUALITY = 0.8;
+
+// The DB stores the storage path; the public URL is built here.
+const getProductImageUrl = (path) => {
+  if (!path) return '';
+  const { data } = supabase.storage.from(PRODUCT_IMAGE_BUCKET).getPublicUrl(path);
+  return data?.publicUrl || '';
+};
+
+async function uploadProductImage(productId, blob) {
+  // {product_id}/{timestamp}.jpg — a fresh name on every replace, so a new
+  // photo is never served from a stale cache.
+  const path = `${productId}/${Date.now()}.jpg`;
+  const { error } = await supabase.storage
+    .from(PRODUCT_IMAGE_BUCKET)
+    .upload(path, blob, { contentType: 'image/jpeg', cacheControl: '3600', upsert: false });
+  if (error) throw error;
+  return path;
+}
+
+async function deleteProductImage(path) {
+  if (!path) return;
+  try {
+    const { error } = await supabase.storage.from(PRODUCT_IMAGE_BUCKET).remove([path]);
+    if (error) console.error('[inventory-app] Could not delete product photo:', error);
+  } catch (e) {
+    console.error('[inventory-app] Could not delete product photo:', e);
+  }
+}
+
+const IMAGE_FILE_RE = /\.(jpe?g|png|gif|webp|bmp|avif|heic|heif)$/i;
+const isImageFile = (file) =>
+  !!file && (String(file.type || '').startsWith('image/') || IMAGE_FILE_RE.test(file.name || ''));
+
+async function decodeImage(file) {
+  if (typeof createImageBitmap === 'function') {
+    try { return await createImageBitmap(file); } catch (e) { /* fall back to <img> */ }
+  }
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('this browser cannot read that image format.')); };
+    img.src = url;
+  });
+}
+
+// Canvas resize + JPEG compress. No new dependencies.
+async function compressImageFile(file) {
+  const img = await decodeImage(file);
+  const width = img.width || img.naturalWidth;
+  const height = img.height || img.naturalHeight;
+  if (!width || !height) throw new Error('that image has no readable dimensions.');
+
+  const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(width, height));
+  const targetW = Math.max(1, Math.round(width * scale));
+  const targetH = Math.max(1, Math.round(height * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = targetW;
+  canvas.height = targetH;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('this browser cannot process images.');
+  ctx.fillStyle = '#FFFFFF'; // JPEG has no alpha — flatten transparent PNGs onto white
+  ctx.fillRect(0, 0, targetW, targetH);
+  ctx.drawImage(img, 0, 0, targetW, targetH);
+  if (typeof img.close === 'function') img.close();
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY));
+  if (!blob) throw new Error('could not compress that image.');
+  return blob;
+}
+
 // DB rows use snake_case; the app uses camelCase.
 const productFromRow = (r) => ({
   id: r.id, name: r.name, sku: r.sku || '', category: r.category || CATEGORIES[0],
   material: r.material || '', color: r.color || '', dimensions: r.dimensions || '',
   costPrice: Number(r.cost_price) || 0, sellPrice: Number(r.sell_price) || 0,
   stock: Number(r.stock) || 0, reorderLevel: Number(r.reorder_level) || 0, supplier: r.supplier || '',
+  imagePath: r.image_path || '',
 });
 const productToRow = (p) => ({
   id: p.id, name: p.name, sku: p.sku || null, category: p.category, material: p.material || null,
   color: p.color || null, dimensions: p.dimensions || null, cost_price: p.costPrice, sell_price: p.sellPrice,
   stock: p.stock, reorder_level: p.reorderLevel, supplier: p.supplier || null,
+  image_path: p.imagePath || null,
 });
 const movementFromRow = (r) => ({
   id: r.id, productId: r.product_id, productName: r.product_name, sku: r.sku,
@@ -90,26 +170,46 @@ function useSupabaseStore() {
       if (error) throw error;
       setProducts(prev => [...prev, productFromRow(data[0])]);
       setError(null);
-    } catch (e) { console.error(e); setError(`Could not save product (${e.message}).`); }
+      return { ok: true };
+    } catch (e) {
+      console.error(e);
+      setError(`Could not save product (${e.message}).`);
+      return { ok: false, message: e.message };
+    }
   }
 
   async function editProduct(product) {
     try {
-      const { id, ...rest } = productToRow(product);
+      // Stock only changes through stock movements — never via a product edit.
+      const { id, stock, ...rest } = productToRow(product);
       const { error } = await supabase.from('products').update(rest).eq('id', product.id);
       if (error) throw error;
-      setProducts(prev => prev.map(p => p.id === product.id ? product : p));
+      setProducts(prev => prev.map(p => p.id === product.id ? { ...product, stock: p.stock } : p));
       setError(null);
-    } catch (e) { console.error(e); setError(`Could not update product (${e.message}).`); }
+      return { ok: true };
+    } catch (e) {
+      console.error(e);
+      setError(`Could not update product (${e.message}).`);
+      return { ok: false, message: e.message };
+    }
   }
 
   async function removeProduct(id) {
     try {
+      const target = products.find(p => p.id === id);
       const { error } = await supabase.from('products').delete().eq('id', id);
       if (error) throw error;
       setProducts(prev => prev.filter(p => p.id !== id));
       setError(null);
-    } catch (e) { console.error(e); setError(`Could not delete product (${e.message}).`); }
+      // Best effort: the product row is already gone, so a failed file
+      // removal must not block the delete — log it and move on.
+      if (target?.imagePath) await deleteProductImage(target.imagePath);
+      return { ok: true };
+    } catch (e) {
+      console.error(e);
+      setError(`Could not delete product (${e.message}).`);
+      return { ok: false, message: e.message };
+    }
   }
 
   async function addMovement(movement, newStock) {
@@ -167,7 +267,9 @@ function useSupabaseStore() {
       await supabase.from('movements').delete().not('id', 'is', null);
       await supabase.from('purchase_orders').delete().not('id', 'is', null);
       await supabase.from('products').delete().not('id', 'is', null);
-      if (newProducts.length) { const { error } = await supabase.from('products').insert(newProducts.map(productToRow)); if (error) throw error; }
+      // Backups may carry either camelCase imagePath or snake_case image_path.
+      const restoredProducts = newProducts.map(p => ({ ...p, imagePath: p.imagePath ?? p.image_path ?? '' }));
+      if (restoredProducts.length) { const { error } = await supabase.from('products').insert(restoredProducts.map(productToRow)); if (error) throw error; }
       if (newMovements.length) { const { error } = await supabase.from('movements').insert(newMovements.map(movementToRow)); if (error) throw error; }
       if (newPos.length) { const { error } = await supabase.from('purchase_orders').insert(newPos.map(poToRow)); if (error) throw error; }
       await loadAll();
@@ -316,13 +418,14 @@ function InventoryApp({ profile, onLogout }) {
     });
   }, [products, search, categoryFilter]);
 
-  function saveProduct(data) {
-    if (data.id) {
-      editProduct(data);
-    } else {
-      insertProduct({ ...data, id: genId('prod'), stock: Number(data.stock) || 0 });
-    }
-    setProductModal(null);
+  async function saveProduct(data, isNew) {
+    // The modal uploads any photo first, then calls this. It returns
+    // { ok } so the modal can clean up / stay open if the row save fails.
+    const result = isNew
+      ? await insertProduct({ ...data, id: data.id || genId('prod'), stock: Number(data.stock) || 0 })
+      : await editProduct(data);
+    if (result.ok) setProductModal(null);
+    return result;
   }
 
   function deleteProduct(id) {
@@ -370,7 +473,11 @@ function InventoryApp({ profile, onLogout }) {
   const fileInputRef = useRef(null);
 
   function exportData() {
-    const payload = { products, movements, pos, exportedAt: new Date().toISOString() };
+    const payload = {
+      // image_path is exported as plain text (storage path, never the binary).
+      products: products.map(p => ({ ...p, image_path: p.imagePath || null })),
+      movements, pos, exportedAt: new Date().toISOString(),
+    };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -389,6 +496,7 @@ function InventoryApp({ profile, onLogout }) {
       SKU: p.sku, Name: p.name, Category: p.category, Material: p.material, Color: p.color,
       Dimensions: p.dimensions, Supplier: p.supplier, 'Cost Price (RM)': p.costPrice,
       'Sell Price (RM)': p.sellPrice, Stock: p.stock, 'Reorder Level': p.reorderLevel,
+      'Image Path': p.imagePath || '',
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(productRows), 'Products');
 
@@ -718,7 +826,10 @@ function HangTag({ product, rotate, canEdit, onRestock }) {
     >
       <div className="absolute left-1/2 -top-1.5 w-3 h-3 rounded-full -translate-x-1/2" style={{ backgroundColor: COLORS.bg, border: `1px solid ${COLORS.inkFaint}` }} />
       <div className="font-mono tracking-wide mb-1" style={{ color: COLORS.inkFaint, fontSize: '10px' }}>{product.sku || '—'}</div>
-      <div className="font-display text-sm leading-tight mb-2" style={{ color: COLORS.ink }}>{product.name}</div>
+      <div className="flex items-center gap-2 mb-2">
+        <ProductThumb product={product} size={28} />
+        <div className="font-display text-sm leading-tight" style={{ color: COLORS.ink }}>{product.name}</div>
+      </div>
       <div className="flex items-baseline gap-1 mb-3">
         <span className="font-mono text-lg font-medium" style={{ color: COLORS.rust }}>{product.stock}</span>
         <span className="font-body text-xs" style={{ color: COLORS.inkSoft }}>left · reorder at {product.reorderLevel}</span>
@@ -730,6 +841,8 @@ function HangTag({ product, rotate, canEdit, onRestock }) {
 
 // ---------- Products ----------
 function ProductsView({ products, total, search, setSearch, categoryFilter, setCategoryFilter, canEdit, onNew, onEdit, onDelete, onMove }) {
+  const [lightboxProduct, setLightboxProduct] = useState(null);
+
   return (
     <div>
       <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
@@ -769,8 +882,13 @@ function ProductsView({ products, total, search, setSearch, categoryFilter, setC
               <tr key={p.id} style={{ borderBottom: `1px solid ${COLORS.borderSoft}` }}>
                 <td className="px-4 py-3 font-mono text-xs" style={{ color: COLORS.inkFaint }}>{p.sku || '—'}</td>
                 <td className="px-4 py-3">
-                  <div style={{ color: COLORS.ink }}>{p.name}</div>
-                  <div className="text-xs" style={{ color: COLORS.inkFaint }}>{[p.material, p.color, p.dimensions].filter(Boolean).join(' · ')}</div>
+                  <div className="flex items-center gap-2.5">
+                    <ProductThumb product={p} size={40} onOpen={p.imagePath ? () => setLightboxProduct(p) : undefined} />
+                    <div className="min-w-0">
+                      <div style={{ color: COLORS.ink }}>{p.name}</div>
+                      <div className="text-xs" style={{ color: COLORS.inkFaint }}>{[p.material, p.color, p.dimensions].filter(Boolean).join(' · ')}</div>
+                    </div>
+                  </div>
                 </td>
                 <td className="px-4 py-3" style={{ color: COLORS.inkSoft }}>{p.category}</td>
                 <td className="px-4 py-3">
@@ -792,6 +910,61 @@ function ProductsView({ products, total, search, setSearch, categoryFilter, setC
           </tbody>
         </table>
       </div>
+
+      {lightboxProduct && (
+        <ImageLightbox product={lightboxProduct} onClose={() => setLightboxProduct(null)} />
+      )}
+    </div>
+  );
+}
+
+function ProductThumb({ product, size = 40, onOpen }) {
+  const url = getProductImageUrl(product?.imagePath);
+  const boxStyle = {
+    width: size, height: size, borderRadius: '6px', flexShrink: 0,
+    border: `1px solid ${COLORS.border}`, backgroundColor: COLORS.bg, overflow: 'hidden',
+  };
+  const inner = url
+    ? <img src={url} alt={product?.name || 'Product photo'} loading="lazy" className="w-full h-full object-cover" />
+    : <Package size={Math.round(size * 0.45)} color={COLORS.inkFaint} />;
+
+  if (url && onOpen) {
+    return (
+      <button type="button" onClick={onOpen} title="View photo"
+        className="flex items-center justify-center cursor-zoom-in" style={{ ...boxStyle, padding: 0 }}>
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center justify-center" style={boxStyle} title={url ? product?.name : 'No photo'}>
+      {inner}
+    </div>
+  );
+}
+
+function ImageLightbox({ product, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const url = getProductImageUrl(product.imagePath);
+  if (!url) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ backgroundColor: 'rgba(42,36,32,0.85)' }}
+      onClick={onClose}
+    >
+      <button type="button" onClick={onClose} title="Close"
+        className="absolute top-3 right-3 p-2 rounded-full" style={{ backgroundColor: '#FAF6F0', color: COLORS.ink }}>
+        <X size={18} />
+      </button>
+      <img src={url} alt={product.name} onClick={(e) => e.stopPropagation()}
+        className="max-w-full object-contain rounded" style={{ maxHeight: '90vh' }} />
     </div>
   );
 }
@@ -810,15 +983,111 @@ function ProductModal({ initial, onClose, onSave }) {
     costPrice: '', sellPrice: '', stock: 0, reorderLevel: 3, supplier: '',
   });
   const [formError, setFormError] = useState('');
+  const [photoError, setPhotoError] = useState('');
+  const [photoBlob, setPhotoBlob] = useState(null); // new compressed photo, not uploaded yet
+  const [photoPreview, setPhotoPreview] = useState('');
+  const [removePhoto, setRemovePhoto] = useState(false); // existing photo marked for deletion on save
+  const [busy, setBusy] = useState(false);
+  // A new product gets its id here, so the photo can be uploaded under
+  // {product_id}/... before the row is created.
+  const [newProductId] = useState(() => genId('prod'));
+  const productId = initial?.id || newProductId;
+  const photoInputRef = useRef(null);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
-  const handleSubmit = (e) => {
+  useEffect(() => {
+    if (!photoBlob) { setPhotoPreview(''); return undefined; }
+    const url = URL.createObjectURL(photoBlob);
+    setPhotoPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [photoBlob]);
+
+  const existingPhotoUrl = removePhoto ? '' : getProductImageUrl(initial?.imagePath);
+  const previewUrl = photoPreview || existingPhotoUrl;
+
+  const handlePhotoChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    setPhotoError('');
+    if (!isImageFile(file)) {
+      setPhotoError('That file is not an image. Choose a JPG, PNG or WebP photo.');
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setPhotoError(`That photo is ${(file.size / (1024 * 1024)).toFixed(1)} MB. Please choose one under 8 MB.`);
+      return;
+    }
+    setBusy(true);
+    try {
+      const blob = await compressImageFile(file);
+      setPhotoBlob(blob);
+      setRemovePhoto(false);
+    } catch (err) {
+      console.error('[inventory-app] Could not read image:', err);
+      setPhotoError(`Could not read that photo (${err.message || 'unsupported format'}). HEIC photos from some phones are not supported — choose a JPG or PNG instead.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setPhotoBlob(null);
+    setPhotoPreview('');
+    setRemovePhoto(true);
+    setPhotoError('');
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    if (busy) return;
     if (!form.name || !form.name.trim()) { setFormError('Product name is required.'); return; }
     if (form.costPrice === '' || form.costPrice === null || isNaN(Number(form.costPrice))) { setFormError('Cost price is required.'); return; }
     if (form.sellPrice === '' || form.sellPrice === null || isNaN(Number(form.sellPrice))) { setFormError('Sell price is required.'); return; }
     setFormError('');
-    onSave({ ...form, costPrice: Number(form.costPrice) || 0, sellPrice: Number(form.sellPrice) || 0, stock: Number(form.stock) || 0, reorderLevel: Number(form.reorderLevel) || 0 });
+    setPhotoError('');
+
+    const originalPath = initial?.imagePath || '';
+    let uploadedPath = '';
+    let imagePath = removePhoto ? '' : originalPath;
+
+    // Upload first; never save a row that points at a photo that isn't there.
+    if (photoBlob) {
+      setBusy(true);
+      try {
+        uploadedPath = await uploadProductImage(productId, photoBlob);
+        imagePath = uploadedPath;
+      } catch (err) {
+        console.error('[inventory-app] Photo upload failed:', err);
+        setBusy(false);
+        setPhotoError(`Could not upload the photo (${err.message || 'unknown error'}). The product was not saved.`);
+        return;
+      }
+    }
+
+    const result = await onSave({
+      ...form,
+      id: productId,
+      imagePath,
+      costPrice: Number(form.costPrice) || 0,
+      sellPrice: Number(form.sellPrice) || 0,
+      stock: Number(form.stock) || 0,
+      reorderLevel: Number(form.reorderLevel) || 0,
+    }, !initial);
+    setBusy(false);
+
+    if (!result || !result.ok) {
+      // Row save failed after the upload: drop the orphaned file.
+      if (uploadedPath) await deleteProductImage(uploadedPath);
+      setFormError(result?.message
+        ? `Could not save the product (${result.message}).${uploadedPath ? ' The new photo was not kept.' : ''}`
+        : `Could not save the product.${uploadedPath ? ' The new photo was not kept.' : ''}`);
+      return;
+    }
+
+    // Saved — now it is safe to delete the replaced / removed old file.
+    if (originalPath && originalPath !== imagePath) deleteProductImage(originalPath);
   };
 
   return (
@@ -849,9 +1118,44 @@ function ProductModal({ initial, onClose, onSave }) {
           </Field>
           <Field label="Reorder level"><input type="number" style={inputStyle} value={form.reorderLevel} onChange={set('reorderLevel')} /></Field>
         </div>
+
+        <div className="mb-3.5">
+          <span className="block text-xs font-medium font-body mb-1.5" style={{ color: COLORS.inkSoft }}>Product photo</span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center overflow-hidden shrink-0"
+              style={{ width: 72, height: 72, borderRadius: '6px', border: `1px solid ${COLORS.border}`, backgroundColor: COLORS.bg }}>
+              {previewUrl
+                ? <img src={previewUrl} alt="Product photo preview" className="w-full h-full object-cover" />
+                : <Package size={26} color={COLORS.inkFaint} />}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded text-sm font-medium font-body cursor-pointer"
+                style={{ color: COLORS.ink, border: `1px solid ${COLORS.border}`, backgroundColor: 'transparent', opacity: busy ? 0.6 : 1 }}>
+                <Camera size={15} />
+                {previewUrl ? 'Replace photo' : 'Choose photo'}
+                <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
+              </label>
+              {previewUrl && (
+                <button type="button" onClick={handleRemovePhoto} className="font-body text-xs font-medium underline" style={{ color: COLORS.rust }}>
+                  Remove photo
+                </button>
+              )}
+              {busy && <span className="font-body text-xs" style={{ color: COLORS.inkFaint }}>Processing…</span>}
+            </div>
+          </div>
+          <p className="font-body text-[11px] mt-1.5" style={{ color: COLORS.inkFaint }}>
+            JPG, PNG or WebP up to 8 MB. Photos are resized to 1200 px and compressed automatically.
+          </p>
+          {photoError && (
+            <div className="mt-2 px-3 py-2 rounded text-xs font-body font-medium" style={{ backgroundColor: COLORS.rustBg, color: COLORS.rust }}>
+              {photoError}
+            </div>
+          )}
+        </div>
+
         <div className="flex justify-end gap-2 mt-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit">{initial ? 'Save changes' : 'Add product'}</Button>
+          <Button type="submit">{busy ? 'Saving…' : (initial ? 'Save changes' : 'Add product')}</Button>
         </div>
       </form>
     </Modal>
